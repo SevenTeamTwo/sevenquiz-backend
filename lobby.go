@@ -86,6 +86,8 @@ func checkUsername(username string) error {
 }
 
 var createLobbyHandler = func(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+
 	username := r.URL.Query().Get("username")
 	if err := checkUsername(username); err != nil {
 		apiErr := apiErrorResponse{err.Error()}
@@ -160,6 +162,8 @@ type userRegisterResponse struct {
 }
 
 var lobbyHandler = func(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+
 	id := r.PathValue("id")
 	if id == "" {
 		apiErr := apiErrorResponse{"missing id"}
