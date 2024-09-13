@@ -16,6 +16,8 @@ var defaultUpgrader = websocket.Upgrader{
 	},
 }
 
+var jwtSecret = []byte("myjwtsecret1234")
+
 type apiErrorResponse struct {
 	Error string `json:"error"`
 }
