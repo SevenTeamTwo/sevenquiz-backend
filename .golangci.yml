@@ -85,7 +85,6 @@ linters:
     - staticcheck
     - stylecheck
     - tagalign
-    - tagliatelle
     - tenv
     - testableexamples
     - testifylint
