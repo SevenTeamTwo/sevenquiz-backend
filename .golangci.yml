@@ -12,7 +12,6 @@ linters:
     - containedctx
     - contextcheck
     - copyloopvar
-    - cyclop
     - decorder
     - dogsled
     - dupl
@@ -25,7 +24,6 @@ linters:
     - fatcontext
     - forbidigo
     - forcetypeassert
-    - gci
     - ginkgolinter
     - gocheckcompilerdirectives
     - gochecknoinits
@@ -62,7 +60,6 @@ linters:
     - nestif
     - nilerr
     - nilnil
-    - nlreturn
     - noctx
     - nolintlint
     - nosprintfhostport
@@ -89,12 +86,12 @@ linters:
     - typecheck
     - unconvert
     - unparam
-    - unused
     - usestdlibvars
     - wastedassign
     - whitespace
     - wsl
     - zerologlint
+  disable: unused
 
 issues:
   exclude-use-default: false

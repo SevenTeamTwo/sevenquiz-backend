@@ -43,7 +43,8 @@ type apiRequest struct {
 
 type apiErrorData struct {
 	Code    int    `json:"code"`
-	Message string `json:"message"`
+	Message string `json:"message,omitempty"`
+	Extra   any    `json:"extra,omitempty"`
 }
 
 func writeJSON(w http.ResponseWriter, statusCode int, v any) {
