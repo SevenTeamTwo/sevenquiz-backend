@@ -18,9 +18,6 @@ import (
 type client struct {
 	// Username is unique and used to define the lobby owner.
 	Username string
-
-	// Registered defines if a client registered a username.
-	Registered bool
 }
 
 type lobbyState int
@@ -34,9 +31,10 @@ const (
 )
 
 type lobby struct {
-	ID      string    `json:"id"`
-	Created time.Time `json:"created"`
-	Owner   string    `json:"owner"`
+	ID         string    `json:"id"`
+	Created    time.Time `json:"created"`
+	Owner      string    `json:"owner"`
+	MaxPlayers int       `json:"max_players"`
 
 	// tokenValidity invalidates an access token if the "token_validity" claim
 	// doesn't match. Since lobby ids are short-sized, it prevents previous
@@ -44,19 +42,29 @@ type lobby struct {
 	tokenValidity string
 	mu            sync.Mutex
 	state         lobbyState
-	conns         map[*websocket.Conn]client
+	clients       map[*websocket.Conn]client // registered clients
+	numConns      int                        // number of websocket conns
 }
 
 func (l *lobby) setState(state lobbyState) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
+
 	l.state = state
 }
 
-func (l *lobby) setConn(conn *websocket.Conn, client client) {
+func (l *lobby) assignConn(conn *websocket.Conn, client client) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	l.conns[conn] = client
+
+	l.clients[conn] = client
+}
+
+func (l *lobby) deleteConn(conn *websocket.Conn) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	delete(l.clients, conn)
 }
 
 var lobbies = map[string]*lobby{}
@@ -65,12 +73,12 @@ var lobbiesMu sync.Mutex
 func addLobby(id string, lobby *lobby) {
 	lobbiesMu.Lock()
 	defer lobbiesMu.Unlock()
+
 	lobbies[id] = lobby
 }
 
 type createLobbyResponse struct {
-	LobbyID string `json:"lobby_id"`
-	Path    string `json:"path"`
+	LobbyID string `json:"id"`
 	Token   string `json:"token"`
 }
 
@@ -78,6 +86,7 @@ func checkUsername(username string) error {
 	if username == "" {
 		return errors.New("missing username")
 	}
+
 	if utf8.RuneCountInString(username) > 25 {
 		return errors.New("username too long")
 	}
@@ -90,8 +99,10 @@ var createLobbyHandler = func(w http.ResponseWriter, r *http.Request) {
 
 	username := r.URL.Query().Get("username")
 	if err := checkUsername(username); err != nil {
-		apiErr := apiErrorResponse{err.Error()}
-		writeJSONResponse(w, http.StatusBadRequest, apiErr)
+		res := apiErrorData{
+			Message: err.Error(),
+		}
+		writeJSON(w, http.StatusBadRequest, res)
 
 		return
 	}
@@ -102,7 +113,12 @@ var createLobbyHandler = func(w http.ResponseWriter, r *http.Request) {
 		lobbyID = shortuuid.New()
 		if len(lobbyID) < 5 {
 			log.Println("generated id too short", lobbyID)
-			w.WriteHeader(http.StatusInternalServerError)
+
+			res := apiErrorData{
+				Code:    666,
+				Message: "internal server error",
+			}
+			writeJSON(w, http.StatusInternalServerError, res)
 
 			return
 		}
@@ -115,9 +131,10 @@ var createLobbyHandler = func(w http.ResponseWriter, r *http.Request) {
 				ID:            lobbyID,
 				Created:       time.Now(),
 				Owner:         username,
+				MaxPlayers:    25,
 				tokenValidity: tokenValidity,
 				state:         lobbyStateCreated,
-				conns:         map[*websocket.Conn]client{},
+				clients:       map[*websocket.Conn]client{},
 			})
 
 			break
@@ -135,14 +152,22 @@ var createLobbyHandler = func(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		log.Println(err)
 		delete(lobbies, lobbyID)
-		w.WriteHeader(http.StatusInternalServerError)
+
+		res := apiErrorData{
+			Code:    666,
+			Message: "internal server error",
+		}
+		writeJSON(w, http.StatusInternalServerError, res)
 
 		return
 	}
 
+	// Owner has not upgraded to websocket yet, register a nil conn
+	// in order to retrieve it on login.
+	lobbies[lobbyID].clients[nil] = client{Username: username}
+
 	res := createLobbyResponse{
 		LobbyID: lobbyID,
-		Path:    "/lobby/" + lobbyID,
 		Token:   tokenStr,
 	}
 
@@ -151,31 +176,37 @@ var createLobbyHandler = func(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-type userRegisterRequest struct {
-	Username string `json:"username"`
-}
-
-type userRegisterResponse struct {
-	Username   string `json:"username"`
-	Registered bool   `json:"registered"`
-	Token      string `json:"access_token"`
-}
-
 var lobbyHandler = func(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 
 	id := r.PathValue("id")
 	if id == "" {
-		apiErr := apiErrorResponse{"missing id"}
-		writeJSONResponse(w, http.StatusBadRequest, apiErr)
+		apiErr := apiErrorData{
+			Code:    001,
+			Message: "missing id",
+		}
+		writeJSON(w, http.StatusBadRequest, apiErr)
 
 		return
 	}
 
 	lobby, exist := lobbies[id]
 	if !exist {
-		apiErr := apiErrorResponse{"lobby does not exist"}
-		writeJSONResponse(w, http.StatusNotFound, apiErr)
+		apiErr := apiErrorData{
+			Code:    002,
+			Message: "lobby does not exist",
+		}
+		writeJSON(w, http.StatusNotFound, apiErr)
+
+		return
+	}
+
+	if lobby.state == lobbyStateRegister && lobby.numConns > lobby.MaxPlayers {
+		apiErr := apiErrorData{
+			Code:    003,
+			Message: "too many players",
+		}
+		writeJSON(w, http.StatusForbidden, apiErr)
 
 		return
 	}
@@ -188,135 +219,260 @@ var lobbyHandler = func(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	lobby.numConns++
+	defer func() {
+		if lobby.numConns > 0 {
+			lobby.numConns--
+		}
+	}()
+
 	// Transition to the register state only after a first
 	// call to the handler.
-	if len(lobby.conns) == 0 {
+	if len(lobby.clients) == 0 {
 		lobby.setState(lobbyStateRegister)
 	}
 
-	claims, valid, err := lobby.checkTokenFromRequest(r)
-	if err != nil {
-		log.Println(err)
-	}
-
-	var restitute bool
-
-	if valid {
-		// Restitute client by overriding old conn
-		var username string
-
-		usernameClaim, ok := claims["username"]
-		if ok {
-			username, ok = usernameClaim.(string)
-		}
-
-		if ok && username != "" {
-			var oldConn *websocket.Conn
-			var client client
-
-			for oldConn, client = range lobby.conns {
-				if client.Username == username {
-					break
-				}
-			}
-
-			// Close old connection to avoid network leaks.
-			if oldConn != nil {
-				oldConn.Close()
-			}
-
-			// Restitute client to new websocket conn.
-			if client.Username != "" {
-				restitute = true
-				lobby.setConn(conn, client)
-			}
-		}
-	}
-
-	if !restitute {
-		lobby.setConn(conn, client{
-			Username:   "",
-			Registered: false,
-		})
-	}
-
 	for {
-		if lobby.conns[conn].Registered {
-			time.Sleep(5 * time.Second)
+		req := apiRequest{}
 
-			continue
-		}
-
-		req := userRegisterRequest{}
+		// Block until next request
 		if err := conn.ReadJSON(&req); err != nil {
 			log.Println(err)
 
-			apiErr := apiErrorResponse{"invalid json request"}
-			conn.WriteJSON(apiErr)
+			res := apiResponse{
+				Type: responseTypeError,
+				Data: apiErrorData{
+					Code:    105,
+					Message: "invalid request",
+				},
+			}
+			conn.WriteJSON(res)
 
 			continue
 		}
 
-		if err := checkUsername(req.Username); err != nil {
-			apiErr := apiErrorResponse{err.Error()}
-			writeJSONResponse(w, http.StatusBadRequest, apiErr)
+		switch req.Type {
+		case requestTypeRegister:
+			data := registerRequestData{}
+			if err := unmarshalAny(req.Data, &data); err != nil {
+				log.Println(err)
 
-			return
+				res := apiResponse{
+					Type: responseTypeError,
+					Data: apiErrorData{
+						Code:    105,
+						Message: "invalid request",
+					},
+				}
+				conn.WriteJSON(res)
+
+				return
+			}
+
+			lobby.handleRegister(conn, data)
+		case requestTypeLogin:
+			data := loginRequestData{}
+			if err := unmarshalAny(req.Data, &data); err != nil {
+				log.Println(err)
+
+				res := apiResponse{
+					Type: responseTypeError,
+					Data: apiErrorData{
+						Code:    105,
+						Message: "invalid request",
+					},
+				}
+				conn.WriteJSON(res)
+
+				return
+			}
+
+			lobby.handleLogin(conn, data)
+		default:
+			res := apiResponse{
+				Type: responseTypeError,
+				Data: apiErrorData{
+					Code:    105,
+					Message: "invalid request",
+				},
+			}
+			conn.WriteJSON(res)
 		}
-
-		token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
-			"lobby_id":       lobby.ID,
-			"token_validity": lobby.tokenValidity,
-			"username":       req.Username,
-		})
-
-		tokenString, err := token.SignedString(jwtSecret)
-		if err != nil {
-			log.Println(err)
-
-			apiErr := apiErrorResponse{"internal error: could not register username"}
-			conn.WriteJSON(apiErr)
-
-			return
-		}
-
-		lobby.setConn(conn, client{
-			Username:   req.Username,
-			Registered: true,
-		})
-
-		// There are no cookies sent after the websocket upgrade.
-		// Communicate the new token via json instead.
-		res := userRegisterResponse{
-			Username:   req.Username,
-			Registered: true,
-			Token:      tokenString,
-		}
-
-		conn.WriteJSON(res)
 
 		// TODO: on start, goto next phase
 	}
 }
 
-func (l *lobby) checkTokenFromRequest(r *http.Request) (claims jwt.MapClaims, valid bool, err error) {
-	cookie, err := r.Cookie("access_token")
-	if err != nil {
-		if errors.Is(err, http.ErrNoCookie) {
-			return nil, false, nil
-		}
-
-		return nil, false, err
-	}
-
-	if cookie == nil {
-		return nil, false, nil
-	}
-
-	return l.checkToken(cookie.Value)
+type registerRequestData struct {
+	Username string `json:"username"`
 }
 
-func (l *lobby) checkToken(token string) (claims jwt.MapClaims, valid bool, err error) {
+type registerResponseData struct {
+	Token string `json:"token"`
+}
+
+func (l *lobby) handleRegister(conn *websocket.Conn, data registerRequestData) {
+	// cancel register if user already logged in.
+	if _, ok := l.clients[conn]; ok {
+		res := apiResponse{
+			Type: responseTypeError,
+			Data: apiErrorData{
+				Code:    100,
+				Message: "already logged in",
+			},
+		}
+		conn.WriteJSON(res)
+
+		return
+	}
+
+	if err := checkUsername(data.Username); err != nil {
+		res := apiResponse{
+			Type: responseTypeError,
+			Data: apiErrorData{
+				Message: err.Error(),
+			},
+		}
+		conn.WriteJSON(res)
+
+		return
+	}
+
+	for _, client := range l.clients {
+		if client.Username == data.Username {
+			res := apiResponse{
+				Type: responseTypeError,
+				Data: apiErrorData{
+					Code:    111,
+					Message: "username already exists",
+				},
+			}
+			conn.WriteJSON(res)
+
+			return
+		}
+	}
+
+	c := client{Username: data.Username}
+	l.assignConn(conn, c)
+
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+		"lobby_id":       l.ID,
+		"token_validity": l.tokenValidity,
+		"username":       data.Username,
+	})
+
+	tokenStr, err := token.SignedString(jwtSecret)
+	if err != nil {
+		log.Println(err)
+
+		res := apiResponse{
+			Type: responseTypeError,
+			Data: apiErrorData{
+				Code:    666,
+				Message: "internal server error",
+			},
+		}
+		conn.WriteJSON(res)
+
+		return
+	}
+
+	res := apiResponse{
+		Type: responseTypeRegister,
+		Data: registerResponseData{
+			Token: tokenStr,
+		},
+	}
+
+	conn.WriteJSON(res)
+}
+
+type loginRequestData struct {
+	Token string `json:"token"`
+}
+
+func (l *lobby) handleLogin(conn *websocket.Conn, data loginRequestData) {
+	claims, err := l.checkToken(data.Token)
+	if err != nil {
+		log.Println(err)
+
+		res := apiResponse{
+			Type: responseTypeError,
+			Data: apiErrorData{
+				Code:    112,
+				Message: "invalid token",
+			},
+		}
+		conn.WriteJSON(res)
+
+		return
+	}
+
+	var username string
+
+	usernameClaim, ok := claims["username"]
+	if ok {
+		username, ok = usernameClaim.(string)
+	}
+
+	if !ok || username == "" {
+		res := apiResponse{
+			Type: responseTypeError,
+			Data: apiErrorData{
+				Code:    113,
+				Message: "invalid username claim",
+			},
+		}
+		conn.WriteJSON(res)
+
+		return
+	}
+
+	var (
+		oldConn   *websocket.Conn
+		client    client
+		restitute bool
+	)
+
+	for oldConn, client = range l.clients {
+		if client.Username == username {
+			restitute = true
+
+			break
+		}
+	}
+
+	if !restitute {
+		res := apiResponse{
+			Type: responseTypeError,
+			Data: apiErrorData{
+				Code:    112,
+				Message: "no client to resitute",
+			},
+		}
+		conn.WriteJSON(res)
+
+		return
+	}
+
+	// Close old connection to avoid network leaks.
+	if oldConn != nil {
+		oldConn.Close()
+	}
+
+	l.deleteConn(oldConn)
+	l.assignConn(conn, client)
+
+	res := apiResponse{
+		Type:    responseTypeRegister,
+		Message: "login successful",
+	}
+
+	conn.WriteJSON(res)
+}
+
+func (l *lobby) checkToken(token string) (claims jwt.MapClaims, err error) {
 	jwtToken, err := jwt.Parse(token, func(token *jwt.Token) (any, error) {
 		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
 			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
@@ -325,27 +481,36 @@ func (l *lobby) checkToken(token string) (claims jwt.MapClaims, valid bool, err 
 		return jwtSecret, nil
 	})
 	if err != nil {
-		return nil, false, err
+		return nil, err
 	}
 
 	claims, ok := jwtToken.Claims.(jwt.MapClaims)
 	if !ok {
-		return nil, false, errors.New("could not assert jwt claims")
+		return nil, errors.New("could not assert jwt claims")
 	}
 
 	tokenValidity, ok := claims["token_validity"]
 	if !ok {
-		return nil, false, errors.New("token has no token_validity claim")
+		return nil, errors.New("token has no token_validity claim")
 	}
 
 	tokenValidityStr, ok := tokenValidity.(string)
 	if !ok {
-		return nil, false, errors.New("could not assert token validity to string")
+		return nil, errors.New("could not assert token validity to string")
 	}
 
 	if tokenValidityStr != l.tokenValidity {
-		return nil, false, errors.New("token does not match token validity")
+		return nil, errors.New("token does not match token validity")
 	}
 
-	return claims, true, nil
+	return claims, nil
+}
+
+func unmarshalAny(data map[string]any, v any) error {
+	b, err := json.Marshal(data)
+	if err != nil {
+		return err
+	}
+
+	return json.Unmarshal(b, v)
 }

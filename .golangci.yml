@@ -25,7 +25,6 @@ linters:
     - fatcontext
     - forbidigo
     - forcetypeassert
-    - funlen
     - gci
     - ginkgolinter
     - gocheckcompilerdirectives
@@ -94,6 +93,7 @@ linters:
     - usestdlibvars
     - wastedassign
     - whitespace
+    - wsl
     - zerologlint
 
 issues:

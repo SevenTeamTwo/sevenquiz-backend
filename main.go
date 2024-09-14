@@ -8,7 +8,8 @@ import (
 )
 
 func main() {
-	http.HandleFunc("/lobby/create", createLobbyHandler)
+	// TODO: check HTTP Method.
+	http.HandleFunc("/lobby", createLobbyHandler)
 	http.HandleFunc("/lobby/{id}", lobbyHandler)
 
 	srv := http.Server{

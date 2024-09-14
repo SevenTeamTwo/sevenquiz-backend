@@ -18,11 +18,35 @@ var defaultUpgrader = websocket.Upgrader{
 
 var jwtSecret = []byte("myjwtsecret1234")
 
-type apiErrorResponse struct {
-	Error string `json:"error"`
+const (
+	responseTypeError    = "error"
+	responseTypeLogin    = "login"
+	responseTypeRegister = "register"
+)
+
+type apiResponse struct {
+	Type    string `json:"type"`
+	Message string `json:"message,omitempty"`
+	Data    any    `json:"data,omitempty"`
 }
 
-func writeJSONResponse(w http.ResponseWriter, statusCode int, v any) {
+const (
+	requestTypeError    = "error"
+	requestTypeLogin    = "login"
+	requestTypeRegister = "register"
+)
+
+type apiRequest struct {
+	Type string         `json:"type"`
+	Data map[string]any `json:"data,omitempty"`
+}
+
+type apiErrorData struct {
+	Code    int    `json:"code"`
+	Message string `json:"message"`
+}
+
+func writeJSON(w http.ResponseWriter, statusCode int, v any) {
 	w.WriteHeader(statusCode)
 
 	if err := json.NewEncoder(w).Encode(v); err != nil {
