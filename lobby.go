@@ -207,7 +207,9 @@ func newLobbyHandler() http.HandlerFunc {
 			// Block until next request
 			if err := conn.ReadJSON(&req); err != nil {
 				websocketErrorResponse(conn, err, newInvalidRequestError("bad json"))
-				continue
+				conn.Close()
+
+				return
 			}
 
 			switch req.Type {
