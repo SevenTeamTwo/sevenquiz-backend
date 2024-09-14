@@ -8,9 +8,8 @@ import (
 )
 
 func main() {
-	// TODO: check HTTP Method.
-	http.HandleFunc("/lobby", createLobbyHandler)
-	http.HandleFunc("/lobby/{id}", lobbyHandler)
+	http.Handle("POST /lobby", applyDefaultMiddlewares(newCreateLobbyHandler()))
+	http.Handle("GET /lobby/{id}", applyDefaultMiddlewares(newCreateLobbyHandler()))
 
 	srv := http.Server{
 		Addr:         ":8080",
