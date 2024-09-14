@@ -9,7 +9,7 @@ import (
 
 func main() {
 	http.Handle("POST /lobby", applyDefaultMiddlewares(newCreateLobbyHandler()))
-	http.Handle("GET /lobby/{id}", applyDefaultMiddlewares(newCreateLobbyHandler()))
+	http.Handle("GET /lobby/{id}", applyDefaultMiddlewares(newLobbyHandler()))
 
 	srv := http.Server{
 		Addr:         ":8080",

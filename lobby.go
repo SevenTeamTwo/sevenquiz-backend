@@ -338,7 +338,7 @@ func (l *lobby) handleLogin(conn *websocket.Conn, data loginRequestData) {
 	l.assignConn(conn, client)
 
 	res := apiResponse{
-		Type:    responseTypeRegister,
+		Type:    responseTypeLogin,
 		Message: "login successful",
 	}
 
