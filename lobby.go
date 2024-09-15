@@ -55,12 +55,20 @@ var (
 	defaultMaxPlayers uint64 = 25
 )
 
+type jsonLobby lobby
+
 func (l *lobby) MarshalJSON() ([]byte, error) {
-	type jsonLobby lobby
-	for _, conn := range l.clients {
-		l.PlayerList = append(l.PlayerList, conn.Username)
+	lobby := jsonLobby{
+		ID:         l.ID,
+		Created:    l.Created,
+		Owner:      l.Owner,
+		MaxPlayers: l.MaxPlayers,
+		PlayerList: make([]string, 0, len(l.clients)),
 	}
-	return json.Marshal((*jsonLobby)(l))
+	for _, conn := range l.clients {
+		lobby.PlayerList = append(lobby.PlayerList, conn.Username)
+	}
+	return json.Marshal(&lobby)
 }
 
 func (l *lobby) IncConn() {
