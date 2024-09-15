@@ -18,6 +18,9 @@ import (
 type client struct {
 	// Username is unique and used to define the lobby owner.
 	Username string
+
+	// Score represents the user's quiz score
+	Score float64
 }
 
 type lobbyState int
@@ -35,6 +38,7 @@ type lobby struct {
 	Created    time.Time `json:"created"`
 	Owner      string    `json:"owner"`
 	MaxPlayers int       `json:"max_players"`
+	PlayerList []string  `json:"player_list"`
 
 	// tokenValidity invalidates an access token if the "token_validity" claim
 	// doesn't match. Since lobby ids are short-sized, it prevents previous
@@ -44,6 +48,14 @@ type lobby struct {
 	state         lobbyState
 	clients       map[*websocket.Conn]client // registered clients
 	numConns      int                        // number of websocket conns
+}
+
+func (l *lobby) MarshalJSON() ([]byte, error) {
+	type jsonLobby lobby
+	for _, conn := range l.clients {
+		l.PlayerList = append(l.PlayerList, conn.Username)
+	}
+	return json.Marshal((*jsonLobby)(l))
 }
 
 func (l *lobby) setState(state lobbyState) {
@@ -131,7 +143,6 @@ func newCreateLobbyHandler() http.HandlerFunc {
 			"token_validity": tokenValidity,
 			"username":       username,
 		})
-
 		tokenStr, err := token.SignedString(jwtSecret)
 		if err != nil {
 			delete(lobbies, lobbyID)
@@ -189,14 +200,24 @@ func newLobbyHandler() http.HandlerFunc {
 			}
 		}()
 
-		// Transition to the register state only after a first
-		// call to the handler.
+		// Transition to the registration state only after a first call to the handler.
 		if len(lobby.clients) == 0 {
 			lobby.setState(lobbyStateRegister)
 		}
 
+		// Send banner to conn with current lobby info.
+		res := apiResponse{
+			Type: responseRoom,
+			Data: lobby,
+		}
+		if err := conn.WriteJSON(res); err != nil {
+			log.Println(err)
+			conn.Close()
+			return
+		}
+
 		for {
-			// Block until next request
+			// Blocks until next request
 			req := apiRequest{}
 			if err := conn.ReadJSON(&req); err != nil {
 				websocketErrorResponse(conn, err, newInvalidRequestError("bad json"))
@@ -205,6 +226,14 @@ func newLobbyHandler() http.HandlerFunc {
 			}
 
 			switch req.Type {
+			case requestRoom:
+				res := apiResponse{
+					Type: responseRoom,
+					Data: lobby,
+				}
+				if err := conn.WriteJSON(res); err != nil {
+					log.Println(err)
+				}
 			case requestTypeRegister:
 				data := registerRequestData{}
 				if err := json.Unmarshal(req.Data, &data); err != nil {

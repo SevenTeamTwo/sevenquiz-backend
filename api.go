@@ -21,6 +21,7 @@ const (
 	responseTypeError    = "error"
 	responseTypeLogin    = "login"
 	responseTypeRegister = "register"
+	responseRoom         = "room"
 )
 
 type apiResponse struct {
@@ -33,6 +34,7 @@ const (
 	requestTypeError    = "error"
 	requestTypeLogin    = "login"
 	requestTypeRegister = "register"
+	requestRoom         = "room"
 )
 
 type apiRequest struct {
