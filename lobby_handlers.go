@@ -139,8 +139,18 @@ func newLobbyHandler() http.HandlerFunc {
 			// Blocks until next request
 			req := apiRequest{}
 			if err := conn.ReadJSON(&req); err != nil {
+				defer conn.Close()
 				websocketErrorResponse(conn, err, newInvalidRequestError("bad json"))
-				conn.Close()
+
+				disconnectClient, exist := lobby.clients[conn]
+				if !exist {
+					return
+				}
+				err = lobby.broadcastPlayerUpdate(disconnectClient.Username, "disconnect")
+				if err != nil {
+					log.Println(err)
+				}
+
 				return
 			}
 
@@ -170,6 +180,32 @@ type registerResponseData struct {
 	Token string `json:"token"`
 }
 
+type lobbyUpdateResponseData struct {
+	Username string `json:"username,omitempty"`
+	Action   string `json:"action"`
+}
+
+func (l *lobby) broadcast(v any) error {
+	errs := []error{}
+	for conn := range l.clients {
+		if err := conn.WriteJSON(v); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	return errors.Join(errs...)
+}
+
+func (l *lobby) broadcastPlayerUpdate(username, action string) error {
+	res := apiResponse{
+		Type: responseLobbyUpdate,
+		Data: lobbyUpdateResponseData{
+			Username: username,
+			Action:   action,
+		},
+	}
+	return l.broadcast(res)
+}
+
 func (l *lobby) handleRegister(conn *websocket.Conn, rawJSONData json.RawMessage) {
 	data := registerRequestData{}
 	if err := json.Unmarshal(rawJSONData, &data); err != nil {
@@ -195,8 +231,8 @@ func (l *lobby) handleRegister(conn *websocket.Conn, rawJSONData json.RawMessage
 		}
 	}
 
-	c := client{Username: data.Username}
-	l.assignConn(conn, c)
+	newClient := client{Username: data.Username}
+	l.assignConn(conn, newClient)
 
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
 		"lobby_id":       l.ID,
@@ -219,6 +255,8 @@ func (l *lobby) handleRegister(conn *websocket.Conn, rawJSONData json.RawMessage
 	if err := conn.WriteJSON(res); err != nil {
 		log.Println(err)
 	}
+
+	l.broadcastPlayerUpdate(newClient.Username, "join")
 }
 
 type loginRequestData struct {
@@ -285,4 +323,6 @@ func (l *lobby) handleLogin(conn *websocket.Conn, rawJSONData json.RawMessage) {
 	if err := conn.WriteJSON(res); err != nil {
 		log.Println(err)
 	}
+
+	l.broadcastPlayerUpdate(client.Username, "reconnect")
 }

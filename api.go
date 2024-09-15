@@ -22,6 +22,7 @@ const (
 	responseTypeLogin    = "login"
 	responseTypeRegister = "register"
 	responseRoom         = "room"
+	responseLobbyUpdate  = "lobby_update"
 )
 
 type apiResponse struct {
