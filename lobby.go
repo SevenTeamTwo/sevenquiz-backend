@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"sync"
+	"sync/atomic"
 	"time"
 	"unicode/utf8"
 
@@ -37,7 +38,7 @@ type lobby struct {
 	ID         string    `json:"id"`
 	Created    time.Time `json:"created"`
 	Owner      string    `json:"owner"`
-	MaxPlayers int       `json:"max_players"`
+	MaxPlayers uint64    `json:"max_players"`
 	PlayerList []string  `json:"player_list"`
 
 	// tokenValidity invalidates an access token if the "token_validity" claim
@@ -47,8 +48,15 @@ type lobby struct {
 	mu            sync.Mutex
 	state         lobbyState
 	clients       map[*websocket.Conn]client // registered clients
-	numConns      int                        // number of websocket conns
+	numConns      atomic.Uint64              // number of websocket conns
 }
+
+var (
+	lobbies   = map[string]*lobby{}
+	lobbiesMu sync.Mutex
+
+	defaultMaxPlayers uint64 = 25
+)
 
 func (l *lobby) MarshalJSON() ([]byte, error) {
 	type jsonLobby lobby
@@ -56,6 +64,14 @@ func (l *lobby) MarshalJSON() ([]byte, error) {
 		l.PlayerList = append(l.PlayerList, conn.Username)
 	}
 	return json.Marshal((*jsonLobby)(l))
+}
+
+func (l *lobby) IncConn() {
+	l.numConns.Add(1)
+}
+
+func (l *lobby) DecConn() {
+	l.numConns.Add(^uint64(0))
 }
 
 func (l *lobby) setState(state lobbyState) {
@@ -75,9 +91,6 @@ func (l *lobby) deleteConn(conn *websocket.Conn) {
 	defer l.mu.Unlock()
 	delete(l.clients, conn)
 }
-
-var lobbies = map[string]*lobby{}
-var lobbiesMu sync.Mutex
 
 func addLobby(id string, lobby *lobby) {
 	lobbiesMu.Lock()
@@ -127,7 +140,7 @@ func newCreateLobbyHandler() http.HandlerFunc {
 					ID:            lobbyID,
 					Created:       time.Now(),
 					Owner:         username,
-					MaxPlayers:    25,
+					MaxPlayers:    defaultMaxPlayers,
 					tokenValidity: tokenValidity,
 					state:         lobbyStateCreated,
 					clients:       map[*websocket.Conn]client{},
@@ -180,7 +193,7 @@ func newLobbyHandler() http.HandlerFunc {
 			return
 		}
 
-		if lobby.state == lobbyStateRegister && lobby.numConns > lobby.MaxPlayers {
+		if lobby.state == lobbyStateRegister && lobby.numConns.Load() > lobby.MaxPlayers {
 			httpErrorResponse(w, http.StatusBadRequest, nil, newTooManyPlayersError(lobby.MaxPlayers))
 			return
 		}
@@ -193,12 +206,8 @@ func newLobbyHandler() http.HandlerFunc {
 			return
 		}
 
-		lobby.numConns++
-		defer func() {
-			if lobby.numConns > 0 {
-				lobby.numConns--
-			}
-		}()
+		lobby.IncConn()
+		defer lobby.DecConn()
 
 		// Transition to the registration state only after a first call to the handler.
 		if len(lobby.clients) == 0 {
