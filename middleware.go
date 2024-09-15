@@ -30,15 +30,15 @@ const RequestIDKey ctxKeyRequestID = 0
 
 func requestIDMiddleware(h http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		ctx := r.Context()
-
 		requestID := r.Header.Get("X-Request-ID")
 		if requestID == "" {
 			requestID = uuid.New().String()
 		}
 
-		w.Header().Set("X-Request-ID", requestID)
+		ctx := r.Context()
 		ctx = context.WithValue(ctx, RequestIDKey, requestID)
+
+		w.Header().Set("X-Request-ID", requestID)
 		h.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
@@ -49,6 +49,5 @@ func applyDefaultMiddlewares(h http.Handler) http.Handler {
 	for _, mw := range []middleware{requestIDMiddleware, defaultCORS.Handler, defaultHTTPLogger} {
 		h = mw(h)
 	}
-
 	return h
 }

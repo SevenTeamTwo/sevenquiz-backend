@@ -49,21 +49,18 @@ type lobby struct {
 func (l *lobby) setState(state lobbyState) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-
 	l.state = state
 }
 
 func (l *lobby) assignConn(conn *websocket.Conn, client client) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-
 	l.clients[conn] = client
 }
 
 func (l *lobby) deleteConn(conn *websocket.Conn) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-
 	delete(l.clients, conn)
 }
 
@@ -73,7 +70,6 @@ var lobbiesMu sync.Mutex
 func addLobby(id string, lobby *lobby) {
 	lobbiesMu.Lock()
 	defer lobbiesMu.Unlock()
-
 	lobbies[id] = lobby
 }
 
@@ -86,11 +82,9 @@ func checkUsername(username string) error {
 	if username == "" {
 		return errors.New("missing username")
 	}
-
 	if utf8.RuneCountInString(username) > 25 {
 		return errors.New("username too long")
 	}
-
 	return nil
 }
 
@@ -202,32 +196,28 @@ func newLobbyHandler() http.HandlerFunc {
 		}
 
 		for {
-			req := apiRequest{}
-
 			// Block until next request
+			req := apiRequest{}
 			if err := conn.ReadJSON(&req); err != nil {
 				websocketErrorResponse(conn, err, newInvalidRequestError("bad json"))
 				conn.Close()
-
 				return
 			}
 
 			switch req.Type {
 			case requestTypeRegister:
 				data := registerRequestData{}
-				if err := unmarshalAny(req.Data, &data); err != nil {
+				if err := json.Unmarshal(req.Data, &data); err != nil {
 					websocketErrorResponse(conn, err, newInvalidRequestError("invalid register request"))
 					return
 				}
-
 				lobby.handleRegister(conn, data)
 			case requestTypeLogin:
 				data := loginRequestData{}
-				if err := unmarshalAny(req.Data, &data); err != nil {
+				if err := json.Unmarshal(req.Data, &data); err != nil {
 					websocketErrorResponse(conn, err, newInvalidRequestError("invalid login request"))
 					return
 				}
-
 				lobby.handleLogin(conn, data)
 			default:
 				websocketErrorResponse(conn, nil, newInvalidRequestError("unknown request type"))
@@ -272,7 +262,6 @@ func (l *lobby) handleRegister(conn *websocket.Conn, data registerRequestData) {
 		"token_validity": l.tokenValidity,
 		"username":       data.Username,
 	})
-
 	tokenStr, err := token.SignedString(jwtSecret)
 	if err != nil {
 		websocketErrorResponse(conn, err, newUsernameAlreadyExistsError())
@@ -286,7 +275,9 @@ func (l *lobby) handleRegister(conn *websocket.Conn, data registerRequestData) {
 		},
 	}
 
-	conn.WriteJSON(res)
+	if err := conn.WriteJSON(res); err != nil {
+		log.Println(err)
+	}
 }
 
 type loginRequestData struct {
@@ -344,7 +335,9 @@ func (l *lobby) handleLogin(conn *websocket.Conn, data loginRequestData) {
 		Message: "login successful",
 	}
 
-	conn.WriteJSON(res)
+	if err := conn.WriteJSON(res); err != nil {
+		log.Println(err)
+	}
 }
 
 func (l *lobby) checkToken(token string) (claims jwt.MapClaims, err error) {
@@ -368,24 +361,13 @@ func (l *lobby) checkToken(token string) (claims jwt.MapClaims, err error) {
 	if !ok {
 		return nil, errors.New("token has no token_validity claim")
 	}
-
 	tokenValidityStr, ok := tokenValidity.(string)
 	if !ok {
 		return nil, errors.New("could not assert token validity to string")
 	}
-
 	if tokenValidityStr != l.tokenValidity {
 		return nil, errors.New("token does not match token validity")
 	}
 
 	return claims, nil
-}
-
-func unmarshalAny(data map[string]any, v any) error {
-	b, err := json.Marshal(data)
-	if err != nil {
-		return err
-	}
-
-	return json.Unmarshal(b, v)
 }

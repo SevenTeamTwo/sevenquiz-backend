@@ -11,27 +11,25 @@ func httpErrorResponse(w http.ResponseWriter, statusCode int, err error, apiErr 
 	if err != nil {
 		log.Println(err)
 	}
-
-	w.WriteHeader(statusCode)
-
-	writeJSON(w, http.StatusBadRequest, apiErr)
+	if err := writeJSON(w, statusCode, apiErr); err != nil {
+		log.Println(err)
+	}
 }
 
 func websocketErrorResponse(conn *websocket.Conn, err error, apiErr apiErrorData) {
 	if conn == nil {
 		return
 	}
-
 	if err != nil {
 		log.Println(err)
 	}
-
 	res := apiResponse{
 		Type: responseTypeError,
 		Data: apiErr,
 	}
-
-	conn.WriteJSON(res)
+	if err := conn.WriteJSON(res); err != nil {
+		log.Println(err)
+	}
 }
 
 const (

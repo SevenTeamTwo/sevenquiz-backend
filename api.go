@@ -2,7 +2,6 @@ package main
 
 import (
 	"encoding/json"
-	"log"
 	"net/http"
 	"time"
 
@@ -37,8 +36,8 @@ const (
 )
 
 type apiRequest struct {
-	Type string         `json:"type"`
-	Data map[string]any `json:"data,omitempty"`
+	Type string          `json:"type"`
+	Data json.RawMessage `json:"data,omitempty"`
 }
 
 type apiErrorData struct {
@@ -47,10 +46,7 @@ type apiErrorData struct {
 	Extra   any    `json:"extra,omitempty"`
 }
 
-func writeJSON(w http.ResponseWriter, statusCode int, v any) {
+func writeJSON(w http.ResponseWriter, statusCode int, v any) error {
 	w.WriteHeader(statusCode)
-
-	if err := json.NewEncoder(w).Encode(v); err != nil {
-		log.Println(err)
-	}
+	return json.NewEncoder(w).Encode(v)
 }
