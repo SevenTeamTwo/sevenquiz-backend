@@ -56,9 +56,9 @@ func newCreateLobbyHandler() http.HandlerFunc {
 
 		// TODO: invalidate token on lobby deletion.
 		token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
-			"lobby_id":       lobbyID,
-			"token_validity": tokenValidity,
-			"username":       username,
+			"lobbyId":       lobbyID,
+			"tokenValidity": tokenValidity,
+			"username":      username,
 		})
 		tokenStr, err := token.SignedString(jwtSecret)
 		if err != nil {
@@ -94,6 +94,43 @@ func (l *lobby) banner(conn *websocket.Conn) error {
 	return conn.WriteJSON(res)
 }
 
+func (l *lobby) handleStepRegister(conn *websocket.Conn) {
+	for {
+		// Blocks until next request
+		req := apiRequest{}
+		if err := conn.ReadJSON(&req); err != nil {
+			defer conn.Close()
+			websocketErrorResponse(conn, err, newInvalidRequestError("bad json"))
+
+			disconnectClient, exist := l.clients[conn]
+			if !exist {
+				return
+			}
+			err = l.broadcastPlayerUpdate(disconnectClient.Username, "disconnect")
+			if err != nil {
+				log.Println(err)
+			}
+
+			return
+		}
+
+		switch req.Type {
+		case requestRoom:
+			if err := l.banner(conn); err != nil {
+				log.Println(err)
+				return
+			}
+		case requestTypeRegister:
+			l.handleRegister(conn, req.Data)
+		case requestTypeLogin:
+			l.handleLogin(conn, req.Data)
+		default:
+			websocketErrorResponse(conn, nil, newInvalidRequestError("unknown request type"))
+			continue
+		}
+	} // TODO: on start, goto next phase
+}
+
 func newLobbyHandler() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		id := r.PathValue("id")
@@ -116,7 +153,6 @@ func newLobbyHandler() http.HandlerFunc {
 		if err != nil {
 			// Upgrade already writes a status code and error message.
 			log.Println(err)
-
 			return
 		}
 
@@ -135,40 +171,7 @@ func newLobbyHandler() http.HandlerFunc {
 			return
 		}
 
-		for {
-			// Blocks until next request
-			req := apiRequest{}
-			if err := conn.ReadJSON(&req); err != nil {
-				defer conn.Close()
-				websocketErrorResponse(conn, err, newInvalidRequestError("bad json"))
-
-				disconnectClient, exist := lobby.clients[conn]
-				if !exist {
-					return
-				}
-				err = lobby.broadcastPlayerUpdate(disconnectClient.Username, "disconnect")
-				if err != nil {
-					log.Println(err)
-				}
-
-				return
-			}
-
-			switch req.Type {
-			case requestRoom:
-				if err := lobby.banner(conn); err != nil {
-					log.Println(err)
-					return
-				}
-			case requestTypeRegister:
-				lobby.handleRegister(conn, req.Data)
-			case requestTypeLogin:
-				lobby.handleLogin(conn, req.Data)
-			default:
-				websocketErrorResponse(conn, nil, newInvalidRequestError("unknown request type"))
-				continue
-			}
-		} // TODO: on start, goto next phase
+		lobby.handleStepRegister(conn)
 	}
 }
 
@@ -235,9 +238,9 @@ func (l *lobby) handleRegister(conn *websocket.Conn, rawJSONData json.RawMessage
 	l.assignConn(conn, newClient)
 
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
-		"lobby_id":       l.ID,
-		"token_validity": l.tokenValidity,
-		"username":       data.Username,
+		"lobbyId":       l.ID,
+		"tokenValidity": l.tokenValidity,
+		"username":      data.Username,
 	})
 	tokenStr, err := token.SignedString(jwtSecret)
 	if err != nil {
@@ -256,7 +259,9 @@ func (l *lobby) handleRegister(conn *websocket.Conn, rawJSONData json.RawMessage
 		log.Println(err)
 	}
 
-	l.broadcastPlayerUpdate(newClient.Username, "join")
+	if err := l.broadcastPlayerUpdate(newClient.Username, "join"); err != nil {
+		log.Println(err)
+	}
 }
 
 type loginRequestData struct {
@@ -324,5 +329,7 @@ func (l *lobby) handleLogin(conn *websocket.Conn, rawJSONData json.RawMessage) {
 		log.Println(err)
 	}
 
-	l.broadcastPlayerUpdate(client.Username, "reconnect")
+	if err := l.broadcastPlayerUpdate(client.Username, "reconnect"); err != nil {
+		log.Println(err)
+	}
 }

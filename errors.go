@@ -82,7 +82,7 @@ func newTooManyPlayersError(maxPlayers uint64) apiErrorData {
 		Code:    tooManyPlayersCode,
 		Message: "too many players",
 		Extra: struct {
-			MaxPlayers uint64 `json:"max_players"`
+			MaxPlayers uint64 `json:"maxPlayers"`
 		}{
 			MaxPlayers: maxPlayers,
 		},

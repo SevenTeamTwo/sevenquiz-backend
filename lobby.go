@@ -35,10 +35,10 @@ type lobby struct {
 	ID         string    `json:"id"`
 	Created    time.Time `json:"created"`
 	Owner      string    `json:"owner"`
-	MaxPlayers uint64    `json:"max_players"`
-	PlayerList []string  `json:"player_list"`
+	MaxPlayers uint64    `json:"maxPlayers"`
+	PlayerList []string  `json:"playerList"`
 
-	// tokenValidity invalidates an access token if the "token_validity" claim
+	// tokenValidity invalidates an access token if the "tokenValidity" claim
 	// doesn't match. Since lobby ids are short-sized, it prevents previous
 	// lobby owner/players from accessing a newly created lobby with the old token.
 	tokenValidity string
@@ -122,9 +122,9 @@ func (l *lobby) checkToken(token string) (claims jwt.MapClaims, err error) {
 		return nil, errors.New("could not assert jwt claims")
 	}
 
-	tokenValidity, ok := claims["token_validity"]
+	tokenValidity, ok := claims["tokenValidity"]
 	if !ok {
-		return nil, errors.New("token has no token_validity claim")
+		return nil, errors.New("token has no tokenValidity claim")
 	}
 	tokenValidityStr, ok := tokenValidity.(string)
 	if !ok {
