@@ -66,6 +66,17 @@ func (l *lobby) MarshalJSON() ([]byte, error) {
 	return json.Marshal((*jsonLobby)(l))
 }
 
+func (l *lobby) banner(conn *websocket.Conn) error {
+	if conn == nil {
+		return errors.New("nil websocket")
+	}
+	res := apiResponse{
+		Type: responseRoom,
+		Data: l,
+	}
+	return conn.WriteJSON(res)
+}
+
 func (l *lobby) IncConn() {
 	l.numConns.Add(1)
 }
@@ -192,7 +203,6 @@ func newLobbyHandler() http.HandlerFunc {
 			httpErrorResponse(w, http.StatusBadRequest, nil, newLobbyNotFoundError())
 			return
 		}
-
 		if lobby.state == lobbyStateRegister && lobby.numConns.Load() > lobby.MaxPlayers {
 			httpErrorResponse(w, http.StatusBadRequest, nil, newTooManyPlayersError(lobby.MaxPlayers))
 			return
@@ -215,11 +225,7 @@ func newLobbyHandler() http.HandlerFunc {
 		}
 
 		// Send banner to conn with current lobby info.
-		res := apiResponse{
-			Type: responseRoom,
-			Data: lobby,
-		}
-		if err := conn.WriteJSON(res); err != nil {
+		if err := lobby.banner(conn); err != nil {
 			log.Println(err)
 			conn.Close()
 			return
@@ -236,27 +242,14 @@ func newLobbyHandler() http.HandlerFunc {
 
 			switch req.Type {
 			case requestRoom:
-				res := apiResponse{
-					Type: responseRoom,
-					Data: lobby,
-				}
-				if err := conn.WriteJSON(res); err != nil {
+				if err := lobby.banner(conn); err != nil {
 					log.Println(err)
+					return
 				}
 			case requestTypeRegister:
-				data := registerRequestData{}
-				if err := json.Unmarshal(req.Data, &data); err != nil {
-					websocketErrorResponse(conn, err, newInvalidRequestError("invalid register request"))
-					return
-				}
-				lobby.handleRegister(conn, data)
+				lobby.handleRegister(conn, req.Data)
 			case requestTypeLogin:
-				data := loginRequestData{}
-				if err := json.Unmarshal(req.Data, &data); err != nil {
-					websocketErrorResponse(conn, err, newInvalidRequestError("invalid login request"))
-					return
-				}
-				lobby.handleLogin(conn, data)
+				lobby.handleLogin(conn, req.Data)
 			default:
 				websocketErrorResponse(conn, nil, newInvalidRequestError("unknown request type"))
 				continue
@@ -273,7 +266,13 @@ type registerResponseData struct {
 	Token string `json:"token"`
 }
 
-func (l *lobby) handleRegister(conn *websocket.Conn, data registerRequestData) {
+func (l *lobby) handleRegister(conn *websocket.Conn, rawJSONData json.RawMessage) {
+	data := registerRequestData{}
+	if err := json.Unmarshal(rawJSONData, &data); err != nil {
+		websocketErrorResponse(conn, err, newInvalidRequestError("invalid register request"))
+		return
+	}
+
 	// cancel register if user already logged in.
 	if _, ok := l.clients[conn]; ok {
 		websocketErrorResponse(conn, nil, newUserAlreadyRegisteredError())
@@ -322,7 +321,13 @@ type loginRequestData struct {
 	Token string `json:"token"`
 }
 
-func (l *lobby) handleLogin(conn *websocket.Conn, data loginRequestData) {
+func (l *lobby) handleLogin(conn *websocket.Conn, rawJSONData json.RawMessage) {
+	data := loginRequestData{}
+	if err := json.Unmarshal(rawJSONData, &data); err != nil {
+		websocketErrorResponse(conn, err, newInvalidRequestError("invalid login request"))
+		return
+	}
+
 	claims, err := l.checkToken(data.Token)
 	if err != nil {
 		websocketErrorResponse(conn, err, newInvalidTokenError())
