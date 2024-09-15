@@ -4,8 +4,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
-	"net/http"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -13,7 +11,6 @@ import (
 
 	"github.com/golang-jwt/jwt"
 	"github.com/gorilla/websocket"
-	"github.com/lithammer/shortuuid/v3"
 )
 
 type client struct {
@@ -66,17 +63,6 @@ func (l *lobby) MarshalJSON() ([]byte, error) {
 	return json.Marshal((*jsonLobby)(l))
 }
 
-func (l *lobby) banner(conn *websocket.Conn) error {
-	if conn == nil {
-		return errors.New("nil websocket")
-	}
-	res := apiResponse{
-		Type: responseRoom,
-		Data: l,
-	}
-	return conn.WriteJSON(res)
-}
-
 func (l *lobby) IncConn() {
 	l.numConns.Add(1)
 }
@@ -109,11 +95,6 @@ func addLobby(id string, lobby *lobby) {
 	lobbies[id] = lobby
 }
 
-type createLobbyResponse struct {
-	LobbyID string `json:"id"`
-	Token   string `json:"token"`
-}
-
 func checkUsername(username string) error {
 	if username == "" {
 		return errors.New("missing username")
@@ -122,265 +103,6 @@ func checkUsername(username string) error {
 		return errors.New("username too long")
 	}
 	return nil
-}
-
-func newCreateLobbyHandler() http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		username := r.URL.Query().Get("username")
-		if err := checkUsername(username); err != nil {
-			httpErrorResponse(w, http.StatusBadRequest, err, newInvalidUsernameError(err.Error()))
-			return
-		}
-
-		var lobbyID, tokenValidity string
-
-		for {
-			lobbyID = shortuuid.New()
-			if len(lobbyID) < 5 {
-				err := errors.New("generated id too short: " + lobbyID)
-				httpErrorResponse(w, http.StatusInternalServerError, err, newInternalServerError())
-
-				return
-			}
-
-			lobbyID = lobbyID[:5]
-			tokenValidity = shortuuid.New()
-
-			if _, exist := lobbies[lobbyID]; !exist {
-				addLobby(lobbyID, &lobby{
-					ID:            lobbyID,
-					Created:       time.Now(),
-					Owner:         username,
-					MaxPlayers:    defaultMaxPlayers,
-					tokenValidity: tokenValidity,
-					state:         lobbyStateCreated,
-					clients:       map[*websocket.Conn]client{},
-				})
-
-				break
-			}
-		}
-
-		// TODO: invalidate token on lobby deletion.
-		token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
-			"lobby_id":       lobbyID,
-			"token_validity": tokenValidity,
-			"username":       username,
-		})
-		tokenStr, err := token.SignedString(jwtSecret)
-		if err != nil {
-			delete(lobbies, lobbyID)
-			httpErrorResponse(w, http.StatusInternalServerError, err, newInternalServerError())
-
-			return
-		}
-
-		// Owner has not upgraded to websocket yet, register a nil conn
-		// in order to retrieve it on login.
-		lobbies[lobbyID].clients[nil] = client{Username: username}
-
-		res := createLobbyResponse{
-			LobbyID: lobbyID,
-			Token:   tokenStr,
-		}
-
-		if err := json.NewEncoder(w).Encode(res); err != nil {
-			log.Println(err)
-		}
-	}
-}
-
-func newLobbyHandler() http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		id := r.PathValue("id")
-		if id == "" {
-			httpErrorResponse(w, http.StatusBadRequest, nil, newMissingURLQueryError("id"))
-			return
-		}
-
-		lobby, exist := lobbies[id]
-		if !exist {
-			httpErrorResponse(w, http.StatusBadRequest, nil, newLobbyNotFoundError())
-			return
-		}
-		if lobby.state == lobbyStateRegister && lobby.numConns.Load() > lobby.MaxPlayers {
-			httpErrorResponse(w, http.StatusBadRequest, nil, newTooManyPlayersError(lobby.MaxPlayers))
-			return
-		}
-
-		conn, err := defaultUpgrader.Upgrade(w, r, nil)
-		if err != nil {
-			// Upgrade already writes a status code and error message.
-			log.Println(err)
-
-			return
-		}
-
-		lobby.IncConn()
-		defer lobby.DecConn()
-
-		// Transition to the registration state only after a first call to the handler.
-		if len(lobby.clients) == 0 {
-			lobby.setState(lobbyStateRegister)
-		}
-
-		// Send banner to conn with current lobby info.
-		if err := lobby.banner(conn); err != nil {
-			log.Println(err)
-			conn.Close()
-			return
-		}
-
-		for {
-			// Blocks until next request
-			req := apiRequest{}
-			if err := conn.ReadJSON(&req); err != nil {
-				websocketErrorResponse(conn, err, newInvalidRequestError("bad json"))
-				conn.Close()
-				return
-			}
-
-			switch req.Type {
-			case requestRoom:
-				if err := lobby.banner(conn); err != nil {
-					log.Println(err)
-					return
-				}
-			case requestTypeRegister:
-				lobby.handleRegister(conn, req.Data)
-			case requestTypeLogin:
-				lobby.handleLogin(conn, req.Data)
-			default:
-				websocketErrorResponse(conn, nil, newInvalidRequestError("unknown request type"))
-				continue
-			}
-		} // TODO: on start, goto next phase
-	}
-}
-
-type registerRequestData struct {
-	Username string `json:"username"`
-}
-
-type registerResponseData struct {
-	Token string `json:"token"`
-}
-
-func (l *lobby) handleRegister(conn *websocket.Conn, rawJSONData json.RawMessage) {
-	data := registerRequestData{}
-	if err := json.Unmarshal(rawJSONData, &data); err != nil {
-		websocketErrorResponse(conn, err, newInvalidRequestError("invalid register request"))
-		return
-	}
-
-	// cancel register if user already logged in.
-	if _, ok := l.clients[conn]; ok {
-		websocketErrorResponse(conn, nil, newUserAlreadyRegisteredError())
-		return
-	}
-
-	if err := checkUsername(data.Username); err != nil {
-		websocketErrorResponse(conn, err, newInvalidUsernameError(err.Error()))
-		return
-	}
-
-	for _, client := range l.clients {
-		if client.Username == data.Username {
-			websocketErrorResponse(conn, nil, newUsernameAlreadyExistsError())
-			return
-		}
-	}
-
-	c := client{Username: data.Username}
-	l.assignConn(conn, c)
-
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
-		"lobby_id":       l.ID,
-		"token_validity": l.tokenValidity,
-		"username":       data.Username,
-	})
-	tokenStr, err := token.SignedString(jwtSecret)
-	if err != nil {
-		websocketErrorResponse(conn, err, newUsernameAlreadyExistsError())
-		return
-	}
-
-	res := apiResponse{
-		Type: responseTypeRegister,
-		Data: registerResponseData{
-			Token: tokenStr,
-		},
-	}
-
-	if err := conn.WriteJSON(res); err != nil {
-		log.Println(err)
-	}
-}
-
-type loginRequestData struct {
-	Token string `json:"token"`
-}
-
-func (l *lobby) handleLogin(conn *websocket.Conn, rawJSONData json.RawMessage) {
-	data := loginRequestData{}
-	if err := json.Unmarshal(rawJSONData, &data); err != nil {
-		websocketErrorResponse(conn, err, newInvalidRequestError("invalid login request"))
-		return
-	}
-
-	claims, err := l.checkToken(data.Token)
-	if err != nil {
-		websocketErrorResponse(conn, err, newInvalidTokenError())
-		return
-	}
-
-	var username string
-
-	usernameClaim, ok := claims["username"]
-	if ok {
-		username, ok = usernameClaim.(string)
-	}
-
-	if !ok || username == "" {
-		websocketErrorResponse(conn, nil, newInvalidTokenClaimError("username"))
-		return
-	}
-
-	var (
-		oldConn   *websocket.Conn
-		client    client
-		restitute bool
-	)
-
-	for oldConn, client = range l.clients {
-		if client.Username == username {
-			restitute = true
-
-			break
-		}
-	}
-
-	if !restitute {
-		websocketErrorResponse(conn, nil, newClientRestituteError("no client to resitute"))
-		return
-	}
-
-	// Close old connection to avoid network leaks.
-	if oldConn != nil {
-		oldConn.Close()
-	}
-
-	l.deleteConn(oldConn)
-	l.assignConn(conn, client)
-
-	res := apiResponse{
-		Type:    responseTypeLogin,
-		Message: "login successful",
-	}
-
-	if err := conn.WriteJSON(res); err != nil {
-		log.Println(err)
-	}
 }
 
 func (l *lobby) checkToken(token string) (claims jwt.MapClaims, err error) {
