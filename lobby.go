@@ -48,12 +48,33 @@ type lobby struct {
 	state   lobbyState
 }
 
-var (
-	lobbies   = map[string]*lobby{}
-	lobbiesMu sync.Mutex
+type lobbies struct {
+	lobbies map[string]*lobby
+	mu      sync.Mutex
+}
 
-	defaultMaxPlayers = 25
-)
+func (l *lobbies) register(id string, newLobby *lobby) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.lobbies == nil {
+		l.lobbies = map[string]*lobby{}
+	}
+	l.lobbies[id] = newLobby
+}
+
+func (l *lobbies) get(id string) *lobby {
+	return l.lobbies[id]
+}
+
+func (l *lobbies) delete(id string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	delete(l.lobbies, id)
+}
+
+var quizLobbies = &lobbies{}
+
+const defaultMaxPlayers = 25
 
 type jsonLobby lobby
 
@@ -90,12 +111,6 @@ func (l *lobby) deleteConn(conn *websocket.Conn) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	delete(l.clients, conn)
-}
-
-func addLobby(id string, lobby *lobby) {
-	lobbiesMu.Lock()
-	defer lobbiesMu.Unlock()
-	lobbies[id] = lobby
 }
 
 func checkUsername(username string) error {

@@ -25,10 +25,10 @@ func newCreateLobbyHandler() http.HandlerFunc {
 			return
 		}
 
-		var lobbyID, tokenValidity string
+		var newLobby *lobby
 
 		for {
-			lobbyID = shortuuid.New()
+			lobbyID := shortuuid.New()
 			if len(lobbyID) < 5 {
 				err := errors.New("generated id too short: " + lobbyID)
 				httpErrorResponse(w, http.StatusInternalServerError, err, newInternalServerError())
@@ -37,10 +37,10 @@ func newCreateLobbyHandler() http.HandlerFunc {
 			}
 
 			lobbyID = lobbyID[:5]
-			tokenValidity = shortuuid.New()
+			tokenValidity := shortuuid.New()
 
-			if _, exist := lobbies[lobbyID]; !exist {
-				addLobby(lobbyID, &lobby{
+			if l := quizLobbies.get(lobbyID); l == nil {
+				newLobby = &lobby{
 					ID:            lobbyID,
 					Created:       time.Now(),
 					Owner:         username,
@@ -48,7 +48,8 @@ func newCreateLobbyHandler() http.HandlerFunc {
 					tokenValidity: tokenValidity,
 					state:         lobbyStateCreated,
 					clients:       map[*websocket.Conn]*client{},
-				})
+				}
+				quizLobbies.register(newLobby.ID, newLobby)
 
 				break
 			}
@@ -56,13 +57,13 @@ func newCreateLobbyHandler() http.HandlerFunc {
 
 		// TODO: invalidate token on lobby deletion.
 		token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
-			"lobbyId":       lobbyID,
-			"tokenValidity": tokenValidity,
+			"lobbyId":       newLobby.ID,
+			"tokenValidity": newLobby.tokenValidity,
 			"username":      username,
 		})
 		tokenStr, err := token.SignedString(jwtSecret)
 		if err != nil {
-			delete(lobbies, lobbyID)
+			quizLobbies.delete(newLobby.ID)
 			httpErrorResponse(w, http.StatusInternalServerError, err, newInternalServerError())
 
 			return
@@ -70,10 +71,10 @@ func newCreateLobbyHandler() http.HandlerFunc {
 
 		// Owner has not upgraded to websocket yet, register a nil conn
 		// in order to retrieve it on login.
-		lobbies[lobbyID].clients[nil] = &client{Username: username}
+		newLobby.assignConn(nil, &client{Username: username})
 
 		res := createLobbyResponse{
-			LobbyID: lobbyID,
+			LobbyID: newLobby.ID,
 			Token:   tokenStr,
 		}
 
@@ -139,8 +140,8 @@ func newLobbyHandler() http.HandlerFunc {
 			return
 		}
 
-		lobby, exist := lobbies[id]
-		if !exist {
+		lobby := quizLobbies.get(id)
+		if lobby == nil {
 			httpErrorResponse(w, http.StatusBadRequest, nil, newLobbyNotFoundError())
 			return
 		}

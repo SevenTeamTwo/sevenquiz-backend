@@ -31,7 +31,7 @@ func newTestLobby() *lobby {
 		tokenValidity: shortuuid.New(),
 		clients:       make(map[*websocket.Conn]*client),
 	}
-	lobbies["12345"] = lobby
+	quizLobbies.register("12345", lobby)
 
 	return lobby
 }
