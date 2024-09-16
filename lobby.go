@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"sync"
-	"sync/atomic"
 	"time"
 	"unicode/utf8"
 
@@ -35,24 +34,25 @@ type lobby struct {
 	ID         string    `json:"id"`
 	Created    time.Time `json:"created"`
 	Owner      string    `json:"owner"`
-	MaxPlayers uint64    `json:"maxPlayers"`
+	MaxPlayers int       `json:"maxPlayers"`
 	PlayerList []string  `json:"playerList"`
 
 	// tokenValidity invalidates an access token if the "tokenValidity" claim
 	// doesn't match. Since lobby ids are short-sized, it prevents previous
 	// lobby owner/players from accessing a newly created lobby with the old token.
 	tokenValidity string
-	mu            sync.Mutex
-	state         lobbyState
-	clients       map[*websocket.Conn]client // registered clients
-	numConns      atomic.Uint64              // number of websocket conns
+	// clients represents all the active websockets in a lobby.
+	// A client != nil means a conn has registered.
+	clients map[*websocket.Conn]*client
+	mu      sync.Mutex
+	state   lobbyState
 }
 
 var (
 	lobbies   = map[string]*lobby{}
 	lobbiesMu sync.Mutex
 
-	defaultMaxPlayers uint64 = 25
+	defaultMaxPlayers = 25
 )
 
 type jsonLobby lobby
@@ -65,18 +65,13 @@ func (l *lobby) MarshalJSON() ([]byte, error) {
 		MaxPlayers: l.MaxPlayers,
 		PlayerList: make([]string, 0, len(l.clients)),
 	}
-	for _, conn := range l.clients {
-		lobby.PlayerList = append(lobby.PlayerList, conn.Username)
+	for _, client := range l.clients {
+		if client == nil {
+			continue
+		}
+		lobby.PlayerList = append(lobby.PlayerList, client.Username)
 	}
 	return json.Marshal(&lobby)
-}
-
-func (l *lobby) IncConn() {
-	l.numConns.Add(1)
-}
-
-func (l *lobby) DecConn() {
-	l.numConns.Add(^uint64(0))
 }
 
 func (l *lobby) setState(state lobbyState) {
@@ -85,7 +80,7 @@ func (l *lobby) setState(state lobbyState) {
 	l.state = state
 }
 
-func (l *lobby) assignConn(conn *websocket.Conn, client client) {
+func (l *lobby) assignConn(conn *websocket.Conn, client *client) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.clients[conn] = client

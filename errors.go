@@ -77,12 +77,12 @@ func newLobbyNotFoundError() apiErrorData {
 	}
 }
 
-func newTooManyPlayersError(maxPlayers uint64) apiErrorData {
+func newTooManyPlayersError(maxPlayers int) apiErrorData {
 	return apiErrorData{
 		Code:    tooManyPlayersCode,
 		Message: "too many players",
 		Extra: struct {
-			MaxPlayers uint64 `json:"maxPlayers"`
+			MaxPlayers int `json:"maxPlayers"`
 		}{
 			MaxPlayers: maxPlayers,
 		},

@@ -29,7 +29,7 @@ func newTestLobby() *lobby {
 		Owner:         "me",
 		MaxPlayers:    25,
 		tokenValidity: shortuuid.New(),
-		clients:       make(map[*websocket.Conn]client),
+		clients:       make(map[*websocket.Conn]*client),
 	}
 	lobbies["12345"] = lobby
 
@@ -215,7 +215,7 @@ func TestLobbyLogin(t *testing.T) {
 	lobby := newTestLobby()
 	loginUsername := "testuser"
 
-	lobby.clients[nil] = client{Username: loginUsername}
+	lobby.clients[nil] = &client{Username: loginUsername}
 
 	s, conn, err := setupAndDialTestServer("GET /lobby/{id}", newLobbyHandler(), "/lobby/"+lobby.ID)
 	if err != nil {

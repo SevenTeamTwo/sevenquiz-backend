@@ -47,7 +47,7 @@ func newCreateLobbyHandler() http.HandlerFunc {
 					MaxPlayers:    defaultMaxPlayers,
 					tokenValidity: tokenValidity,
 					state:         lobbyStateCreated,
-					clients:       map[*websocket.Conn]client{},
+					clients:       map[*websocket.Conn]*client{},
 				})
 
 				break
@@ -70,7 +70,7 @@ func newCreateLobbyHandler() http.HandlerFunc {
 
 		// Owner has not upgraded to websocket yet, register a nil conn
 		// in order to retrieve it on login.
-		lobbies[lobbyID].clients[nil] = client{Username: username}
+		lobbies[lobbyID].clients[nil] = &client{Username: username}
 
 		res := createLobbyResponse{
 			LobbyID: lobbyID,
@@ -103,7 +103,7 @@ func (l *lobby) handleStepRegister(conn *websocket.Conn) {
 			websocketErrorResponse(conn, err, newInvalidRequestError("bad json"))
 
 			disconnectClient, exist := l.clients[conn]
-			if !exist {
+			if !exist || disconnectClient == nil {
 				return
 			}
 			err = l.broadcastPlayerUpdate(disconnectClient.Username, "disconnect")
@@ -144,9 +144,13 @@ func newLobbyHandler() http.HandlerFunc {
 			httpErrorResponse(w, http.StatusBadRequest, nil, newLobbyNotFoundError())
 			return
 		}
-		if lobby.state == lobbyStateRegister && lobby.numConns.Load() > lobby.MaxPlayers {
+		if lobby.state == lobbyStateRegister && len(lobby.clients) > lobby.MaxPlayers {
 			httpErrorResponse(w, http.StatusBadRequest, nil, newTooManyPlayersError(lobby.MaxPlayers))
 			return
+		}
+		// Transition to the registration state only after a first call to the handler.
+		if len(lobby.clients) == 0 {
+			lobby.setState(lobbyStateRegister)
 		}
 
 		conn, err := defaultUpgrader.Upgrade(w, r, nil)
@@ -155,14 +159,8 @@ func newLobbyHandler() http.HandlerFunc {
 			log.Println(err)
 			return
 		}
-
-		lobby.IncConn()
-		defer lobby.DecConn()
-
-		// Transition to the registration state only after a first call to the handler.
-		if len(lobby.clients) == 0 {
-			lobby.setState(lobbyStateRegister)
-		}
+		lobby.assignConn(conn, nil)
+		defer lobby.deleteConn(conn)
 
 		// Send banner to conn with current lobby info.
 		if err := lobby.banner(conn); err != nil {
@@ -217,7 +215,7 @@ func (l *lobby) handleRegister(conn *websocket.Conn, rawJSONData json.RawMessage
 	}
 
 	// cancel register if user already logged in.
-	if _, ok := l.clients[conn]; ok {
+	if client, ok := l.clients[conn]; ok && client != nil {
 		websocketErrorResponse(conn, nil, newUserAlreadyRegisteredError())
 		return
 	}
@@ -228,13 +226,16 @@ func (l *lobby) handleRegister(conn *websocket.Conn, rawJSONData json.RawMessage
 	}
 
 	for _, client := range l.clients {
+		if client == nil {
+			continue
+		}
 		if client.Username == data.Username {
 			websocketErrorResponse(conn, nil, newUsernameAlreadyExistsError())
 			return
 		}
 	}
 
-	newClient := client{Username: data.Username}
+	newClient := &client{Username: data.Username}
 	l.assignConn(conn, newClient)
 
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
@@ -295,14 +296,16 @@ func (l *lobby) handleLogin(conn *websocket.Conn, rawJSONData json.RawMessage) {
 
 	var (
 		oldConn   *websocket.Conn
-		client    client
+		client    *client
 		restitute bool
 	)
 
 	for oldConn, client = range l.clients {
+		if client == nil {
+			continue
+		}
 		if client.Username == username {
 			restitute = true
-
 			break
 		}
 	}
