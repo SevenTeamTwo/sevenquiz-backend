@@ -139,6 +139,13 @@ func (l *lobby) checkToken(token string) (claims jwt.MapClaims, err error) {
 	if !ok {
 		return nil, errors.New("could not assert jwt claims")
 	}
+	lobbyID, ok := claims["lobbyId"].(string)
+	if !ok {
+		return nil, errors.New("token has no lobbyId claim")
+	}
+	if lobbyID != l.ID {
+		return nil, errors.New("token does not match lobby id")
+	}
 	tokenValidity, ok := claims["tokenValidity"].(string)
 	if !ok {
 		return nil, errors.New("token has no tokenValidity claim")

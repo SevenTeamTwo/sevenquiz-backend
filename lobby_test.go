@@ -231,6 +231,7 @@ func TestLobbyLogin(t *testing.T) {
 
 	// Generate token with "username" claim and tokenValidity.
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+		"lobbyId":       lobby.ID,
 		"username":      loginUsername,
 		"tokenValidity": lobby.tokenValidity,
 	})
