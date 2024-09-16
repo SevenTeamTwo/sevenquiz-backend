@@ -26,7 +26,6 @@ linters:
     - forcetypeassert
     - ginkgolinter
     - gocheckcompilerdirectives
-    - gochecknoinits
     - gochecksumtype
     - gocognit
     - goconst
@@ -49,7 +48,6 @@ linters:
     - interfacebloat
     - intrange
     - ireturn
-    - lll
     - loggercheck
     - maintidx
     - makezero
@@ -63,7 +61,6 @@ linters:
     - noctx
     - nolintlint
     - nosprintfhostport
-    - paralleltest
     - perfsprint
     - prealloc
     - predeclared
@@ -82,7 +79,6 @@ linters:
     - testifylint
     - testpackage
     - thelper
-    - tparallel
     - typecheck
     - unconvert
     - unparam
@@ -101,6 +97,7 @@ linters-settings:
   errcheck:
     exclude-functions:
       - (net/http.ResponseWriter).Write
+      - (io.ReadCloser).Close
       - (*github.com/gorilla/websocket.Conn).Close
       - (*github.com/gorilla/websocket.Conn).WriteMessage
       - (*github.com/gorilla/websocket.Conn).WriteJSON
