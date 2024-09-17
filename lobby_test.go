@@ -8,6 +8,7 @@ import (
 	"log"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -83,13 +84,7 @@ func TestLobbyBanner(t *testing.T) {
 	}
 	`)
 
-	ok, err := compactAndCompareJSON(wantBanner, gotBanner)
-	if err != nil {
-		t.Fatalf("%v", err)
-	}
-	if !ok {
-		t.Fatalf("banner mismatch, want: %s, got: %s", wantBanner, gotBanner)
-	}
+	assertEqualJSON(t, wantBanner, gotBanner)
 }
 
 func TestLobbyRegister(t *testing.T) {
@@ -110,7 +105,7 @@ func TestLobbyRegister(t *testing.T) {
 
 	registerUsername := "testuser"
 
-	if err = writeFormattedJSON(conn, `
+	if err = writeMessagef(conn, `
 	{
 		"type": "register",
 		"data": {
@@ -120,18 +115,15 @@ func TestLobbyRegister(t *testing.T) {
 		t.Fatalf("%v", err)
 	}
 
-	type registerCmdRes struct {
+	registerRes := struct {
 		Type string               `json:"type,omitempty"`
 		Data registerResponseData `json:"data,omitempty"`
-	}
+	}{}
 
-	registerRes := registerCmdRes{}
 	if err := conn.ReadJSON(&registerRes); err != nil {
 		t.Fatalf("%v", err)
 	}
-	if registerRes.Type != responseTypeRegister {
-		t.Fatalf("cmd response type mismatch, want: %s, got: %s", responseTypeRegister, registerRes.Type)
-	}
+	assertEqual(t, responseTypeRegister, registerRes.Type)
 
 	token, err := jwt.Parse(registerRes.Data.Token, func(token *jwt.Token) (interface{}, error) {
 		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
@@ -151,9 +143,7 @@ func TestLobbyRegister(t *testing.T) {
 	if !ok {
 		t.Fatal("invalid username claim")
 	}
-	if usernameClaim != registerUsername {
-		t.Fatalf("username claim mismatch, want: %s, got: %s", registerUsername, usernameClaim)
-	}
+	assertEqual(t, registerUsername, usernameClaim)
 
 	// Update Token with placeholder since signature part is dynamic.
 	// This is okay to modify since token was validated above.
@@ -173,13 +163,7 @@ func TestLobbyRegister(t *testing.T) {
 	}
 	`)
 
-	ok, err = compactAndCompareJSON(wantResponse, gotResponse)
-	if err != nil {
-		t.Fatalf("%v", err)
-	}
-	if !ok {
-		t.Fatalf("register mismatch, want: %s, got: %s", wantResponse, gotResponse)
-	}
+	assertEqualJSON(t, wantResponse, gotResponse)
 
 	_, gotBroadcast, err := conn.ReadMessage()
 	if err != nil {
@@ -195,21 +179,11 @@ func TestLobbyRegister(t *testing.T) {
 		}
 	}`, registerUsername))
 
-	ok, err = compactAndCompareJSON(wantBroadcast, gotBroadcast)
-	if err != nil {
-		t.Fatalf("%v", err)
-	}
-	if !ok {
-		t.Fatalf("broadcast mismatch, want: %s, got: %s", wantBroadcast, gotBroadcast)
-	}
+	assertEqualJSON(t, wantBroadcast, gotBroadcast)
+	assertEqual(t, 1, len(lobby.clients))
 
-	if n := len(lobby.clients); n != 1 {
-		t.Fatalf("clients number mismatch, want: %d, got: %d", 1, n)
-	}
 	for _, client := range lobby.clients {
-		if client.Username != registerUsername {
-			t.Fatalf("internal client mismatch, want: %s, got: %s", client.Username, registerUsername)
-		}
+		assertEqual(t, registerUsername, client.Username)
 	}
 }
 
@@ -220,6 +194,7 @@ func TestLobbyLogin(t *testing.T) {
 		loginUsername = "testuser"
 	)
 
+	// Setup a client to be restitute.
 	lobby.clients[nil] = &client{Username: loginUsername}
 
 	s, conn, err := setupAndDialTestServer("GET /lobby/{id}", newLobbyHandler(lobbies), "/lobby/"+lobby.ID)
@@ -240,7 +215,7 @@ func TestLobbyLogin(t *testing.T) {
 		t.Fatalf("%v", err)
 	}
 
-	if err = writeFormattedJSON(conn, `
+	if err = writeMessagef(conn, `
 	{
 		"type": "login",
 		"data": {
@@ -250,17 +225,14 @@ func TestLobbyLogin(t *testing.T) {
 		t.Fatalf("%v", err)
 	}
 
-	type loginCmdRes struct {
+	loginRes := struct {
 		Type string `json:"type,omitempty"`
-	}
+	}{}
 
-	loginRes := loginCmdRes{}
 	if err := conn.ReadJSON(&loginRes); err != nil {
 		t.Fatalf("%v", err)
 	}
-	if loginRes.Type != responseTypeLogin {
-		t.Fatalf("cmd response type mismatch, want: %s, got: %s", responseTypeLogin, loginRes.Type)
-	}
+	assertEqual(t, responseTypeLogin, loginRes.Type)
 
 	_, gotBroadcast, err := conn.ReadMessage()
 	if err != nil {
@@ -276,24 +248,12 @@ func TestLobbyLogin(t *testing.T) {
 		}
 	}`, loginUsername))
 
-	ok, err := compactAndCompareJSON(wantBroadcast, gotBroadcast)
-	if err != nil {
-		t.Fatalf("%v", err)
-	}
-	if !ok {
-		t.Fatalf("broadcast mismatch, want: %s, got: %s", wantBroadcast, gotBroadcast)
-	}
+	assertEqualJSON(t, wantBroadcast, gotBroadcast)
+	assertEqual(t, 1, len(lobby.clients))
 
-	if n := len(lobby.clients); n != 1 {
-		t.Fatalf("clients number mismatch, want: %d, got: %d", 1, n)
-	}
 	for conn, client := range lobby.clients {
-		if client.Username != loginUsername {
-			t.Fatalf("internal client mismatch, want: %s, got: %s", client.Username, loginUsername)
-		}
-		if conn == nil {
-			t.Fatal("client was set to nil conn")
-		}
+		assertEqual(t, loginUsername, client.Username)
+		assertNotNil(t, conn)
 	}
 
 	// Assert error on register while already logged in.
@@ -309,26 +269,22 @@ func TestLobbyLogin(t *testing.T) {
 		t.Fatalf("%v", err)
 	}
 
-	type cmdError struct {
+	errorRes := struct {
 		Type string       `json:"type,omitempty"`
 		Data apiErrorData `json:"data,omitempty"`
-	}
+	}{}
 
-	errorRes := cmdError{}
 	if err := conn.ReadJSON(&errorRes); err != nil {
 		t.Fatalf("%v", err)
 	}
-	if errorRes.Type != responseTypeError {
-		t.Fatalf("cmd response type mismatch, want: %s, got: %s", responseTypeError, errorRes.Type)
-	}
-	if errorRes.Data.Code != userAlreadyRegisteredCode {
-		t.Fatalf("cmd error code mismatch, want: %d, got: %d", userAlreadyRegisteredCode, errorRes.Data.Code)
-	}
 
-	// Assert failure on tokenValidity switch.
+	assertEqual(t, responseTypeError, errorRes.Type)
+	assertEqual(t, userAlreadyRegisteredCode, errorRes.Data.Code)
+
+	// Assert the token is invalidate on tokenValidity switch.
 	lobby.tokenValidity = shortuuid.New()
 
-	if err = writeFormattedJSON(conn, `
+	if err = writeMessagef(conn, `
 	{
 		"type": "login",
 		"data": {
@@ -338,16 +294,17 @@ func TestLobbyLogin(t *testing.T) {
 		t.Fatalf("%v", err)
 	}
 
-	errorRes = cmdError{}
+	errorRes = struct {
+		Type string       `json:"type,omitempty"`
+		Data apiErrorData `json:"data,omitempty"`
+	}{}
+
 	if err := conn.ReadJSON(&errorRes); err != nil {
 		t.Fatalf("%v", err)
 	}
-	if errorRes.Type != responseTypeError {
-		t.Fatalf("cmd response type mismatch, want: %s, got: %s", responseTypeError, errorRes.Type)
-	}
-	if errorRes.Data.Code != invalidTokenErrorCode {
-		t.Fatalf("cmd error code mismatch, want: %d, got: %d", invalidTokenErrorCode, errorRes.Data.Code)
-	}
+
+	assertEqual(t, responseTypeError, errorRes.Type)
+	assertEqual(t, invalidTokenErrorCode, errorRes.Data.Code)
 }
 
 func TestLobbyTimeout(t *testing.T) {
@@ -370,9 +327,12 @@ func TestLobbyTimeout(t *testing.T) {
 	// wait for the goroutine to process the delete
 	time.Sleep(1 * time.Millisecond)
 
-	if l := lobbies.get(resJSON.LobbyID); l != nil {
-		t.Fatalf("cmd response type mismatch, want: %v, got: %v", nil, l)
-	}
+	assertNil(t, lobbies.get(resJSON.LobbyID))
+}
+
+func writeMessagef(conn *websocket.Conn, format string, args ...any) error {
+	msg := fmt.Sprintf(format, args...)
+	return conn.WriteMessage(websocket.TextMessage, []byte(msg))
 }
 
 func compactJSON(src []byte) ([]byte, error) {
@@ -383,19 +343,42 @@ func compactJSON(src []byte) ([]byte, error) {
 	return bytes.TrimRight(buf.Bytes(), "\n"), nil
 }
 
-func compactAndCompareJSON(want, got []byte) (bool, error) {
+func assertEqualJSON(t *testing.T, want, got []byte) {
+	t.Helper()
+
 	wantBytes, err := compactJSON(want)
 	if err != nil {
-		return false, err
+		t.Errorf("%v", err)
+		return
 	}
 	gotBytes, err := compactJSON(got)
 	if err != nil {
-		return false, err
+		t.Errorf("%v", err)
+		return
 	}
-	return bytes.Equal(wantBytes, gotBytes), nil
+
+	if !bytes.Equal(wantBytes, gotBytes) {
+		t.Errorf("assert equal json: got %s, want %s", wantBytes, gotBytes)
+	}
 }
 
-func writeFormattedJSON(conn *websocket.Conn, format string, args ...any) error {
-	msg := fmt.Sprintf(format, args...)
-	return conn.WriteJSON(json.RawMessage(msg))
+func assertEqual(t *testing.T, want, got interface{}) {
+	t.Helper()
+	if want != got {
+		t.Errorf("assert equal: got %v (type %v), want %v (type %v)", want, reflect.TypeOf(want), got, reflect.TypeOf(got))
+	}
+}
+
+func assertNil(t *testing.T, got interface{}) {
+	t.Helper()
+	if !(got == nil || reflect.ValueOf(got).IsNil()) {
+		t.Errorf("assert nil: got %v", got)
+	}
+}
+
+func assertNotNil(t *testing.T, got interface{}) {
+	t.Helper()
+	if got == nil || reflect.ValueOf(got).IsNil() {
+		t.Errorf("assert not nil: got %v", got)
+	}
 }
