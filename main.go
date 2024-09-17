@@ -4,15 +4,50 @@ import (
 	"errors"
 	"log"
 	"net/http"
+	"os"
 	"time"
+
+	"sevenquiz-api/internal/middleware"
+	"sevenquiz-api/internal/quiz"
+
+	"github.com/MadAppGang/httplog"
+	"github.com/gorilla/websocket"
+	"github.com/rs/cors"
 )
 
-func main() {
-	lobbies := &lobbies{}
+var (
+	defaultMaxPlayers   = 25
+	defaultLobbyTimeout = 15 * time.Minute
+	defaultUpgrader     = websocket.Upgrader{
+		HandshakeTimeout: 15 * time.Second,
+		CheckOrigin: func(_ *http.Request) bool {
+			return true // Accepting all requests
+		},
+	}
+)
 
-	createLobbyHandler := newCreateLobbyHandler(lobbies, defaultMaxPlayers, defaultLobbyTimeout)
-	http.Handle("POST /lobby", applyDefaultMiddlewares(createLobbyHandler))
-	http.Handle("GET /lobby/{id}", applyDefaultMiddlewares(newLobbyHandler(lobbies)))
+func init() {
+	if os.Getenv("DEBUG") == "yes" {
+		middleware.CORS = cors.New(cors.Options{
+			AllowedOrigins: []string{"*"},
+		})
+		middleware.HTTPLogger = httplog.LoggerWithConfig(httplog.LoggerConfig{
+			RouterName: "SevenQuiz",
+			Formatter: httplog.ChainLogFormatter(
+				httplog.DefaultLogFormatter,
+				httplog.RequestHeaderLogFormatter, httplog.RequestBodyLogFormatter,
+				httplog.ResponseHeaderLogFormatter, httplog.ResponseBodyLogFormatter),
+			CaptureBody: true,
+		})
+	}
+}
+
+func main() {
+	lobbies := &quiz.Lobbies{}
+
+	createLobbyHandler := quiz.CreateLobbyHandler(lobbies, defaultMaxPlayers, defaultLobbyTimeout)
+	http.Handle("POST /lobby", middleware.ApplyDefaults(createLobbyHandler))
+	http.Handle("GET /lobby/{id}", middleware.ApplyDefaults(quiz.LobbyHandler(lobbies, defaultUpgrader)))
 
 	srv := http.Server{
 		Addr:         ":8080",

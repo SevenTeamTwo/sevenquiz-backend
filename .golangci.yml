@@ -94,6 +94,8 @@ issues:
   max-same-issues: 0
 
 linters-settings:
+  stylecheck:
+    checks: ["all", "-ST1000", "-ST1021"]
   errcheck:
     exclude-functions:
       - (net/http.ResponseWriter).Write

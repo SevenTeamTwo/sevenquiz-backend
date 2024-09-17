@@ -1,4 +1,4 @@
-package main
+package quiz
 
 import (
 	"encoding/json"
@@ -6,86 +6,83 @@ import (
 	"fmt"
 	"sync"
 	"time"
-	"unicode/utf8"
 
 	"github.com/golang-jwt/jwt"
 	"github.com/gorilla/websocket"
 )
 
-type client struct {
+type Client struct {
 	// Username is unique and used to define the lobby owner.
 	Username string
 
 	// Score represents the user's quiz score
 	Score float64
+
+	// hasAlreadyLoggedIn specifies if the client has already joined
+	// the lobby once.
+	hasAlreadyLoggedIn bool
 }
 
 type lobbyState int
 
 const (
-	lobbyStateCreated lobbyState = iota
-	lobbyStateRegister
-	lobbyStateQuiz
-	lobbyStateResponses
-	lobbyStateEnded
+	LobbyStateCreated lobbyState = iota
+	LobbyStateRegister
+	LobbyStateQuiz
+	LobbyStateResponses
+	LobbyStateEnded
 )
 
-type lobby struct {
+// TODO: better way to instantiate a lobby since exposed token secret.
+type Lobby struct {
 	ID         string    `json:"id"`
 	Created    time.Time `json:"created"`
 	Owner      string    `json:"owner"`
 	MaxPlayers int       `json:"maxPlayers"`
 	PlayerList []string  `json:"playerList"`
-
-	// tokenValidity invalidates an access token if the "tokenValidity" claim
+	// TokenValidity invalidates an access token if the "tokenValidity" claim
 	// doesn't match. Since lobby ids are short-sized, it prevents previous
 	// lobby owner/players from accessing a newly created lobby with the old token.
-	tokenValidity string
+	TokenValidity string `json:"-"`
+	TokenSecret   []byte `json:"-"`
+
 	// clients represents all the active websockets in a lobby.
 	// A client != nil means a conn has registered.
-	clients map[*websocket.Conn]*client
+	clients map[*websocket.Conn]*Client
 	mu      sync.Mutex
 	state   lobbyState
 }
 
-type lobbies struct {
-	lobbies map[string]*lobby
-	mu      sync.Mutex
+func (l *Lobby) NumConns() int {
+	return len(l.clients)
 }
 
-func (l *lobbies) register(id string, newLobby *lobby) {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	if l.lobbies == nil {
-		l.lobbies = map[string]*lobby{}
+func (l *Lobby) CloseConns() {
+	for conn := range l.clients {
+		if conn != nil {
+			conn.Close()
+		}
 	}
-	l.lobbies[id] = newLobby
 }
 
-func (l *lobbies) get(id string) *lobby {
-	return l.lobbies[id]
+func (l *Lobby) RangeClients(f func(conn *websocket.Conn, cli *Client) bool) {
+	// TODO: Is it worth it ? GetClient instead ?
+	for conn, cli := range l.clients {
+		if ok := f(conn, cli); !ok {
+			return
+		}
+	}
 }
 
-func (l *lobbies) delete(id string) {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	delete(l.lobbies, id)
-}
+type jsonLobby Lobby
 
-var (
-	defaultMaxPlayers   = 25
-	defaultLobbyTimeout = 15 * time.Minute
-)
-
-type jsonLobby lobby
-
-func (l *lobby) MarshalJSON() ([]byte, error) {
+func (l *Lobby) MarshalJSON() ([]byte, error) {
 	lobby := jsonLobby{
 		ID:         l.ID,
 		Created:    l.Created,
 		Owner:      l.Owner,
 		MaxPlayers: l.MaxPlayers,
-		PlayerList: make([]string, 0, len(l.clients)),
+		PlayerList: make([]string, 0, l.NumConns()),
 	}
 	for _, client := range l.clients {
 		if client == nil {
@@ -96,50 +93,78 @@ func (l *lobby) MarshalJSON() ([]byte, error) {
 	return json.Marshal(&lobby)
 }
 
-func (l *lobby) setState(state lobbyState) {
+func (l *Lobby) GetClient(username string) *Client {
+	for _, client := range l.clients {
+		if client == nil {
+			continue
+		}
+		if client.Username == username {
+			return client
+		}
+	}
+	return nil
+}
+
+func (l *Lobby) SetState(state lobbyState) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.state = state
 }
 
-func (l *lobby) assignConn(conn *websocket.Conn, client *client) {
+func (l *Lobby) AssignConn(conn *websocket.Conn, client *Client) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
+
+	if l.clients == nil {
+		l.clients = make(map[*websocket.Conn]*Client)
+	}
 	l.clients[conn] = client
 }
 
-func (l *lobby) deleteConn(conn *websocket.Conn) {
+func (l *Lobby) ReplaceClientConn(client *Client, newConn *websocket.Conn) {
+	if client == nil {
+		return
+	}
+
 	l.mu.Lock()
 	defer l.mu.Unlock()
+
+	for conn, cli := range l.clients {
+		if cli.Username == client.Username {
+			conn.Close()
+			delete(l.clients, conn)
+		}
+	}
+
+	l.clients[newConn] = client
+}
+
+func (l *Lobby) DeleteConn(conn *websocket.Conn) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	if conn != nil {
+		conn.Close()
+	}
+
 	delete(l.clients, conn)
 }
 
-func checkUsername(username string) error {
-	if username == "" {
-		return errors.New("missing username")
-	}
-	if utf8.RuneCountInString(username) > 25 {
-		return errors.New("username too long")
-	}
-	return nil
-}
-
-func (l *lobby) newToken(username string) (string, error) {
+func (l *Lobby) NewToken(username string) (string, error) {
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
 		"lobbyId":       l.ID,
-		"tokenValidity": l.tokenValidity,
+		"tokenValidity": l.TokenValidity,
 		"username":      username,
 	})
-	return token.SignedString(jwtSecret)
+	return token.SignedString(l.TokenSecret)
 }
 
-func (l *lobby) checkToken(token string) (claims jwt.MapClaims, err error) {
+func (l *Lobby) CheckToken(token string) (claims jwt.MapClaims, err error) {
 	jwtToken, err := jwt.Parse(token, func(token *jwt.Token) (any, error) {
 		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
 			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
 		}
-
-		return jwtSecret, nil
+		return l.TokenSecret, nil
 	})
 	if err != nil {
 		return nil, err
@@ -160,7 +185,7 @@ func (l *lobby) checkToken(token string) (claims jwt.MapClaims, err error) {
 	if !ok {
 		return nil, errors.New("token has no tokenValidity claim")
 	}
-	if tokenValidity != l.tokenValidity {
+	if tokenValidity != l.TokenValidity {
 		return nil, errors.New("token does not match token validity")
 	}
 
