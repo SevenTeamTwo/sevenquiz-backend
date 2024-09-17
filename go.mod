@@ -1,6 +1,6 @@
 module sevenquiz-api
 
-go 1.22.4
+go 1.23.1
 
 require (
 	github.com/MadAppGang/httplog v1.3.0
