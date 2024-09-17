@@ -124,6 +124,15 @@ func checkUsername(username string) error {
 	return nil
 }
 
+func (l *lobby) newToken(username string) (string, error) {
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+		"lobbyId":       l.ID,
+		"tokenValidity": l.tokenValidity,
+		"username":      username,
+	})
+	return token.SignedString(jwtSecret)
+}
+
 func (l *lobby) checkToken(token string) (claims jwt.MapClaims, err error) {
 	jwtToken, err := jwt.Parse(token, func(token *jwt.Token) (any, error) {
 		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {

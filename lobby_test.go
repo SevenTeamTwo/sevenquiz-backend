@@ -235,12 +235,7 @@ func TestLobbyLogin(t *testing.T) {
 	}
 
 	// Generate token with "username" claim and tokenValidity.
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
-		"lobbyId":       lobby.ID,
-		"username":      loginUsername,
-		"tokenValidity": lobby.tokenValidity,
-	})
-	tokenStr, err := token.SignedString(jwtSecret)
+	token, err := lobby.newToken(loginUsername)
 	if err != nil {
 		t.Fatalf("%v", err)
 	}
@@ -251,7 +246,7 @@ func TestLobbyLogin(t *testing.T) {
 		"data": {
 			"token": %q
 		}
-	}`, tokenStr); err != nil {
+	}`, token); err != nil {
 		t.Fatalf("%v", err)
 	}
 
@@ -339,7 +334,7 @@ func TestLobbyLogin(t *testing.T) {
 		"data": {
 			"token": %q
 		}
-	}`, tokenStr); err != nil {
+	}`, token); err != nil {
 		t.Fatalf("%v", err)
 	}
 

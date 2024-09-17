@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/golang-jwt/jwt"
 	"github.com/gorilla/websocket"
 	"github.com/lithammer/shortuuid/v3"
 )
@@ -55,13 +54,7 @@ func newCreateLobbyHandler(lobbies *lobbies, maxPlayers int, lobbyTimeout time.D
 			}
 		}
 
-		// TODO: invalidate token on lobby deletion.
-		token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
-			"lobbyId":       newLobby.ID,
-			"tokenValidity": newLobby.tokenValidity,
-			"username":      username,
-		})
-		tokenStr, err := token.SignedString(jwtSecret)
+		token, err := newLobby.newToken(username)
 		if err != nil {
 			lobbies.delete(newLobby.ID)
 			httpErrorResponse(w, http.StatusInternalServerError, err, newInternalServerError())
@@ -75,7 +68,7 @@ func newCreateLobbyHandler(lobbies *lobbies, maxPlayers int, lobbyTimeout time.D
 
 		res := createLobbyResponse{
 			LobbyID: newLobby.ID,
-			Token:   tokenStr,
+			Token:   token,
 		}
 
 		if err := json.NewEncoder(w).Encode(res); err != nil {
@@ -99,7 +92,7 @@ func newCreateLobbyHandler(lobbies *lobbies, maxPlayers int, lobbyTimeout time.D
 	}
 }
 
-func (l *lobby) banner(conn *websocket.Conn) error {
+func (l *lobby) writeBanner(conn *websocket.Conn) error {
 	if conn == nil {
 		return errors.New("nil websocket")
 	}
@@ -132,7 +125,7 @@ func (l *lobby) handleStepRegister(conn *websocket.Conn) {
 
 		switch req.Type {
 		case requestRoom:
-			if err := l.banner(conn); err != nil {
+			if err := l.writeBanner(conn); err != nil {
 				log.Println(err)
 				return
 			}
@@ -179,7 +172,7 @@ func newLobbyHandler(lobbies *lobbies) http.HandlerFunc {
 		defer lobby.deleteConn(conn)
 
 		// Send banner to conn with current lobby info.
-		if err := lobby.banner(conn); err != nil {
+		if err := lobby.writeBanner(conn); err != nil {
 			log.Println(err)
 			conn.Close()
 			return
@@ -254,12 +247,7 @@ func (l *lobby) handleRegister(conn *websocket.Conn, rawJSONData json.RawMessage
 	newClient := &client{Username: data.Username}
 	l.assignConn(conn, newClient)
 
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
-		"lobbyId":       l.ID,
-		"tokenValidity": l.tokenValidity,
-		"username":      data.Username,
-	})
-	tokenStr, err := token.SignedString(jwtSecret)
+	token, err := l.newToken(data.Username)
 	if err != nil {
 		websocketErrorResponse(conn, err, newUsernameAlreadyExistsError())
 		return
@@ -268,7 +256,7 @@ func (l *lobby) handleRegister(conn *websocket.Conn, rawJSONData json.RawMessage
 	res := apiResponse{
 		Type: responseTypeRegister,
 		Data: registerResponseData{
-			Token: tokenStr,
+			Token: token,
 		},
 	}
 
