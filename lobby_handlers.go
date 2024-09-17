@@ -17,7 +17,7 @@ type createLobbyResponse struct {
 	Token   string `json:"token"`
 }
 
-func newCreateLobbyHandler() http.HandlerFunc {
+func newCreateLobbyHandler(lobbies *lobbies, maxPlayers int, lobbyTimeout time.Duration) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		username := r.URL.Query().Get("username")
 		if err := checkUsername(username); err != nil {
@@ -39,17 +39,17 @@ func newCreateLobbyHandler() http.HandlerFunc {
 			lobbyID = lobbyID[:5]
 			tokenValidity := shortuuid.New()
 
-			if l := quizLobbies.get(lobbyID); l == nil {
+			if l := lobbies.get(lobbyID); l == nil {
 				newLobby = &lobby{
 					ID:            lobbyID,
 					Created:       time.Now(),
 					Owner:         username,
-					MaxPlayers:    defaultMaxPlayers,
+					MaxPlayers:    maxPlayers,
 					tokenValidity: tokenValidity,
 					state:         lobbyStateCreated,
 					clients:       map[*websocket.Conn]*client{},
 				}
-				quizLobbies.register(newLobby.ID, newLobby)
+				lobbies.register(newLobby.ID, newLobby)
 
 				break
 			}
@@ -63,7 +63,7 @@ func newCreateLobbyHandler() http.HandlerFunc {
 		})
 		tokenStr, err := token.SignedString(jwtSecret)
 		if err != nil {
-			quizLobbies.delete(newLobby.ID)
+			lobbies.delete(newLobby.ID)
 			httpErrorResponse(w, http.StatusInternalServerError, err, newInternalServerError())
 
 			return
@@ -81,6 +81,21 @@ func newCreateLobbyHandler() http.HandlerFunc {
 		if err := json.NewEncoder(w).Encode(res); err != nil {
 			log.Println(err)
 		}
+
+		// Lobby timeout
+		go func() {
+			<-time.After(lobbyTimeout)
+			if newLobby.state == lobbyStateCreated || newLobby.state == lobbyStateRegister {
+				for conn := range newLobby.clients {
+					// TODO: broadcast to conns before ?
+					if conn == nil {
+						continue
+					}
+					conn.Close()
+				}
+				lobbies.delete(newLobby.ID)
+			}
+		}()
 	}
 }
 
@@ -132,7 +147,7 @@ func (l *lobby) handleStepRegister(conn *websocket.Conn) {
 	} // TODO: on start, goto next phase
 }
 
-func newLobbyHandler() http.HandlerFunc {
+func newLobbyHandler(lobbies *lobbies) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		id := r.PathValue("id")
 		if id == "" {
@@ -140,7 +155,7 @@ func newLobbyHandler() http.HandlerFunc {
 			return
 		}
 
-		lobby := quizLobbies.get(id)
+		lobby := lobbies.get(id)
 		if lobby == nil {
 			httpErrorResponse(w, http.StatusBadRequest, nil, newLobbyNotFoundError())
 			return

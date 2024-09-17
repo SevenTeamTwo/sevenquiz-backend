@@ -8,8 +8,11 @@ import (
 )
 
 func main() {
-	http.Handle("POST /lobby", applyDefaultMiddlewares(newCreateLobbyHandler()))
-	http.Handle("GET /lobby/{id}", applyDefaultMiddlewares(newLobbyHandler()))
+	lobbies := &lobbies{}
+
+	createLobbyHandler := newCreateLobbyHandler(lobbies, defaultMaxPlayers, defaultLobbyTimeout)
+	http.Handle("POST /lobby", applyDefaultMiddlewares(createLobbyHandler))
+	http.Handle("GET /lobby/{id}", applyDefaultMiddlewares(newLobbyHandler(lobbies)))
 
 	srv := http.Server{
 		Addr:         ":8080",

@@ -72,9 +72,10 @@ func (l *lobbies) delete(id string) {
 	delete(l.lobbies, id)
 }
 
-var quizLobbies = &lobbies{}
-
-const defaultMaxPlayers = 25
+var (
+	defaultMaxPlayers   = 25
+	defaultLobbyTimeout = 15 * time.Minute
+)
 
 type jsonLobby lobby
 

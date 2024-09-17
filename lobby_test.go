@@ -22,7 +22,7 @@ func init() {
 	log.SetOutput(io.Discard)
 }
 
-func newTestLobby() *lobby {
+func newTestLobby(lobbies *lobbies) *lobby {
 	lobby := &lobby{
 		ID:            "12345",
 		Created:       time.Date(2024, 01, 02, 13, 14, 15, 16, time.UTC),
@@ -31,7 +31,7 @@ func newTestLobby() *lobby {
 		tokenValidity: shortuuid.New(),
 		clients:       make(map[*websocket.Conn]*client),
 	}
-	quizLobbies.register("12345", lobby)
+	lobbies.register("12345", lobby)
 
 	return lobby
 }
@@ -55,9 +55,10 @@ func setupAndDialTestServer(pattern string, handler http.HandlerFunc, path strin
 }
 
 func TestLobbyBanner(t *testing.T) {
-	lobby := newTestLobby()
+	lobbies := &lobbies{}
+	lobby := newTestLobby(lobbies)
 
-	s, conn, err := setupAndDialTestServer("GET /lobby/{id}", newLobbyHandler(), "/lobby/"+lobby.ID)
+	s, conn, err := setupAndDialTestServer("GET /lobby/{id}", newLobbyHandler(lobbies), "/lobby/"+lobby.ID)
 	if err != nil {
 		t.Fatalf("%v", err)
 	}
@@ -92,9 +93,10 @@ func TestLobbyBanner(t *testing.T) {
 }
 
 func TestLobbyRegister(t *testing.T) {
-	lobby := newTestLobby()
+	lobbies := &lobbies{}
+	lobby := newTestLobby(lobbies)
 
-	s, conn, err := setupAndDialTestServer("GET /lobby/{id}", newLobbyHandler(), "/lobby/"+lobby.ID)
+	s, conn, err := setupAndDialTestServer("GET /lobby/{id}", newLobbyHandler(lobbies), "/lobby/"+lobby.ID)
 	if err != nil {
 		t.Fatalf("%v", err)
 	}
@@ -212,12 +214,15 @@ func TestLobbyRegister(t *testing.T) {
 }
 
 func TestLobbyLogin(t *testing.T) {
-	lobby := newTestLobby()
-	loginUsername := "testuser"
+	var (
+		lobbies       = &lobbies{}
+		lobby         = newTestLobby(lobbies)
+		loginUsername = "testuser"
+	)
 
 	lobby.clients[nil] = &client{Username: loginUsername}
 
-	s, conn, err := setupAndDialTestServer("GET /lobby/{id}", newLobbyHandler(), "/lobby/"+lobby.ID)
+	s, conn, err := setupAndDialTestServer("GET /lobby/{id}", newLobbyHandler(lobbies), "/lobby/"+lobby.ID)
 	if err != nil {
 		t.Fatalf("%v", err)
 	}
@@ -347,6 +352,31 @@ func TestLobbyLogin(t *testing.T) {
 	}
 	if errorRes.Data.Code != invalidTokenErrorCode {
 		t.Fatalf("cmd error code mismatch, want: %d, got: %d", invalidTokenErrorCode, errorRes.Data.Code)
+	}
+}
+
+func TestLobbyTimeout(t *testing.T) {
+	var (
+		req = httptest.NewRequest(http.MethodPost, "/lobby?username=me", nil)
+		res = httptest.NewRecorder()
+
+		lobbies      = &lobbies{}
+		maxPlayers   = 25
+		lobbyTimeout = time.Duration(0)
+	)
+
+	newCreateLobbyHandler(lobbies, maxPlayers, lobbyTimeout)(res, req)
+
+	resJSON := createLobbyResponse{}
+	if err := json.NewDecoder(res.Body).Decode(&resJSON); err != nil {
+		t.Fatalf("%v", err)
+	}
+
+	// wait for the goroutine to process the delete
+	time.Sleep(1 * time.Millisecond)
+
+	if l := lobbies.get(resJSON.LobbyID); l != nil {
+		t.Fatalf("cmd response type mismatch, want: %v, got: %v", nil, l)
 	}
 }
 
