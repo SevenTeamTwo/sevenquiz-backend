@@ -220,7 +220,10 @@ func TestLobbyLogin(t *testing.T) {
 	)
 
 	// Setup a client to restitute.
-	lobby.AssignConn(nil, &quiz.Client{Username: loginUsername})
+	cli := &quiz.Client{Username: loginUsername}
+	cli.Login()
+
+	lobby.AssignConn(nil, cli)
 
 	s, conn, err := setupAndDialTestServer("GET /lobby/{id}", quiz.LobbyHandler(lobbies, upgrader), "/lobby/"+lobby.ID)
 	if err != nil {

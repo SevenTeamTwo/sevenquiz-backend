@@ -290,6 +290,7 @@ func (l *Lobby) handleLogin(conn *websocket.Conn, rawJSONData json.RawMessage) {
 
 	action := "reconnect"
 	if !client.hasAlreadyLoggedIn {
+		client.Login()
 		action = "join"
 	}
 

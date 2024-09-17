@@ -18,9 +18,19 @@ type Client struct {
 	// Score represents the user's quiz score
 	Score float64
 
-	// hasAlreadyLoggedIn specifies if the client has already joined
-	// the lobby once.
+	// hasAlreadyLoggedIn specifies if the client has already joined the lobby once.
 	hasAlreadyLoggedIn bool
+}
+
+// Login defines that the client has logged in.
+// Done like so in order to never set hasAlreadyLoggedIn back to false.
+func (c *Client) Login() {
+	c.hasAlreadyLoggedIn = true
+}
+
+// HasLoggedIn returns if the client has loggied in.
+func (c *Client) HasLoggedIn() bool {
+	return c.hasAlreadyLoggedIn
 }
 
 type lobbyState int
@@ -130,8 +140,13 @@ func (l *Lobby) ReplaceClientConn(client *Client, newConn *websocket.Conn) {
 	defer l.mu.Unlock()
 
 	for conn, cli := range l.clients {
+		if cli == nil {
+			continue
+		}
 		if cli.Username == client.Username {
-			conn.Close()
+			if conn != nil {
+				conn.Close()
+			}
 			delete(l.clients, conn)
 		}
 	}
