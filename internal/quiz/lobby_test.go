@@ -34,27 +34,40 @@ func newTestLobby(lobbies *quiz.Lobbies) *quiz.Lobby {
 		TokenValidity: shortuuid.New(),
 		TokenSecret:   []byte("myjwtsecret1234"),
 	}
+
+	// Assign lobby owner
+	lobby.AssignConn(nil, &quiz.Client{Username: "me"})
+	lobby.GetClient("me").Disconnect()
+
 	lobbies.Register("12345", lobby)
 
 	return lobby
 }
 
 func setupAndDialTestServer(pattern string, handler http.HandlerFunc, path string) (*httptest.Server, *websocket.Conn, error) {
+	s := setupTestServer(pattern, handler)
+	conn, err := dialTestServerWS(s, path)
+
+	return s, conn, err
+}
+
+func setupTestServer(pattern string, handler http.HandlerFunc) *httptest.Server {
 	mux := http.NewServeMux()
 	mux.HandleFunc(pattern, handler)
 
-	s := httptest.NewServer(mux)
-	defer s.Close()
+	return httptest.NewServer(mux)
+}
 
-	u := "ws" + strings.TrimPrefix(s.URL, "http")
-	u += path
+func dialTestServerWS(s *httptest.Server, path string) (*websocket.Conn, error) {
+	url := "ws" + strings.TrimPrefix(s.URL, "http") + path
 
-	conn, res, err := websocket.DefaultDialer.Dial(u, nil)
+	conn, res, err := websocket.DefaultDialer.Dial(url, nil)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	defer res.Body.Close()
-	return s, conn, nil
+
+	return conn, nil
 }
 
 func TestLobbyBanner(t *testing.T) {
@@ -200,10 +213,10 @@ func TestLobbyRegister(t *testing.T) {
 	assertEqualJSON(t, wantBroadcast, gotBroadcast)
 	assertEqual(t, 1, lobby.NumConns())
 
-	lobby.RangeClients(func(conn *websocket.Conn, cli *quiz.Client) bool {
-		assertEqual(t, registerUsername, cli.Username)
-		return true
-	})
+	cli := lobby.GetClient(registerUsername)
+
+	assertNotNil(t, cli)
+	assertEqual(t, registerUsername, cli.Username)
 }
 
 func TestLobbyLogin(t *testing.T) {
@@ -279,11 +292,10 @@ func TestLobbyLogin(t *testing.T) {
 	assertEqualJSON(t, wantBroadcast, gotBroadcast)
 	assertEqual(t, 1, lobby.NumConns())
 
-	lobby.RangeClients(func(conn *websocket.Conn, cli *quiz.Client) bool {
-		assertEqual(t, loginUsername, cli.Username)
-		assertNotNil(t, conn)
-		return true
-	})
+	cli = lobby.GetClient(loginUsername)
+
+	assertNotNil(t, cli)
+	assertEqual(t, loginUsername, cli.Username)
 
 	// Assert error on register while already logged in.
 	registerCmd := json.RawMessage(`
@@ -359,6 +371,115 @@ func TestLobbyTimeout(t *testing.T) {
 	assertNil(t, lobbies.Get(resJSON.LobbyID))
 }
 
+func TestLobbyPlayerList(t *testing.T) {
+	var (
+		lobbies  = &quiz.Lobbies{}
+		lobby    = newTestLobby(lobbies)
+		upgrader = websocket.Upgrader{
+			HandshakeTimeout: 15 * time.Second,
+			CheckOrigin: func(_ *http.Request) bool {
+				return true // Accepting all requests
+			},
+		}
+
+		path = "/lobby/" + lobby.ID
+	)
+
+	s, conn, err := setupAndDialTestServer("GET /lobby/{id}", quiz.LobbyHandler(lobbies, upgrader), path)
+	assertNil(t, err)
+	defer s.Close()
+	defer conn.Close()
+
+	// Discard Banner
+	_, _, err = conn.ReadMessage()
+	assertNil(t, err)
+
+	var usersConn []*websocket.Conn
+	defer func() {
+		for _, conn := range usersConn {
+			conn.Close()
+		}
+	}()
+
+	for _, username := range []string{"testuser", "testuser2", "testuser3"} {
+		conn2, err := dialTestServerWS(s, path)
+		assertNil(t, err)
+
+		usersConn = append(usersConn, conn2)
+
+		// Discard Banner
+		_, _, err = conn2.ReadMessage()
+		assertNil(t, err)
+
+		err = writeMessagef(conn2, `
+		{
+			"type": "register",
+			"data": {
+				"username": %q
+			}
+		}`, username)
+		assertNil(t, err)
+
+		// Discard response
+		_, _, err = conn2.ReadMessage()
+		assertNil(t, err)
+
+		// Discard broadcast
+		_, _, err = conn.ReadMessage()
+		assertNil(t, err)
+		_, _, err = conn2.ReadMessage()
+		assertNil(t, err)
+	}
+
+	roomCmd := json.RawMessage(`{"type": "room"}`)
+	assertNil(t, conn.WriteJSON(roomCmd))
+
+	_, gotRoom, err := conn.ReadMessage()
+	assertNil(t, err)
+
+	wantRoom := []byte(`
+	{
+		"type": "room",
+		"data":{
+			"id": "12345",
+			"created": "2024-01-02T13:14:15.000000016Z",
+			"owner": "me",
+			"maxPlayers": 25,
+			"playerList": ["testuser","testuser2","testuser3"]
+		}
+	}
+	`)
+
+	assertEqualJSON(t, wantRoom, gotRoom)
+
+	usersConn[0].Close()
+
+	// Discard broadcast
+	_, _, err = conn.ReadMessage()
+	assertNil(t, err)
+
+	roomCmd = json.RawMessage(`{"type": "room"}`)
+	assertNil(t, conn.WriteJSON(roomCmd))
+
+	_, gotRoom, err = conn.ReadMessage()
+	assertNil(t, err)
+
+	wantRoom = []byte(`
+	{
+		"type": "room",
+		"data":{
+			"id": "12345",
+			"created": "2024-01-02T13:14:15.000000016Z",
+			"owner": "me",
+			"maxPlayers": 25,
+			"playerList": ["testuser2","testuser3"]
+		}
+	}
+	`)
+
+	assertEqualJSON(t, wantRoom, gotRoom)
+}
+
 func writeMessagef(conn *websocket.Conn, format string, args ...any) error {
 	msg := fmt.Sprintf(format, args...)
 	return conn.WriteMessage(websocket.TextMessage, []byte(msg))
@@ -387,14 +508,14 @@ func assertEqualJSON(t *testing.T, want, got []byte) {
 	}
 
 	if !bytes.Equal(wantBytes, gotBytes) {
-		t.Errorf("assert equal json: got %s, want %s", wantBytes, gotBytes)
+		t.Errorf("assert equal json: got %s, want %s", gotBytes, wantBytes)
 	}
 }
 
 func assertEqual(t *testing.T, want, got interface{}) {
 	t.Helper()
 	if want != got {
-		t.Errorf("assert equal: got %v (type %v), want %v (type %v)", want, reflect.TypeOf(want), got, reflect.TypeOf(got))
+		t.Errorf("assert equal: got %v (type %v), want %v (type %v)", got, reflect.TypeOf(got), want, reflect.TypeOf(want))
 	}
 }
 
@@ -408,6 +529,6 @@ func assertNil(t *testing.T, got interface{}) {
 func assertNotNil(t *testing.T, got interface{}) {
 	t.Helper()
 	if got == nil || reflect.ValueOf(got).IsNil() {
-		t.Errorf("assert not nil: got %v", got)
+		t.Fatalf("assert not nil: got %v", got)
 	}
 }

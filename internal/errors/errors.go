@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"sevenquiz-api/api"
 
-	"github.com/gorilla/websocket"
+	"sevenquiz-api/internal/websocket"
 )
 
 const (

@@ -7,10 +7,12 @@ import (
 	"net/http"
 	"sevenquiz-api/api"
 	apierrs "sevenquiz-api/internal/errors"
+	"sevenquiz-api/internal/websocket"
 	"time"
 	"unicode/utf8"
 
-	"github.com/gorilla/websocket"
+	gws "github.com/gorilla/websocket"
+
 	"github.com/lithammer/shortuuid/v3"
 )
 
@@ -61,7 +63,7 @@ func CreateLobbyHandler(lobbies *Lobbies, maxPlayers int, lobbyTimeout time.Dura
 
 		// Owner has not upgraded to websocket yet, register a nil conn
 		// in order to retrieve it on login.
-		newLobby.AssignConn(nil, &Client{Username: username})
+		newLobby.AssignConn(nil, &Client{Username: username, disconnected: true})
 
 		res := api.CreateLobbyResponse{
 			LobbyID: newLobby.ID,
@@ -136,7 +138,7 @@ func (l *Lobby) handle(conn *websocket.Conn) {
 	} // TODO: on start, goto next phase
 }
 
-func LobbyHandler(lobbies *Lobbies, upgrader websocket.Upgrader) http.HandlerFunc {
+func LobbyHandler(lobbies *Lobbies, upgrader gws.Upgrader) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		id := r.PathValue("id")
 		if id == "" {
@@ -164,21 +166,35 @@ func LobbyHandler(lobbies *Lobbies, upgrader websocket.Upgrader) http.HandlerFun
 			log.Println(err)
 			return
 		}
+		wsConn := websocket.NewConn(conn)
 
-		lobby.AssignConn(conn, nil)
-		defer conn.Close()
+		lobby.AssignConn(wsConn, nil)
 
-		lobby.handle(conn)
+		defer func() {
+			if c := lobby.GetClientFromConn(wsConn); c != nil {
+				c.Disconnect()
+			}
+			wsConn.Close()
+		}()
+
+		lobby.handle(wsConn)
 	}
 }
 
 func (l *Lobby) broadcast(v any) error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
 	errs := []error{}
 	for conn := range l.clients {
+		if conn == nil {
+			continue
+		}
 		if err := conn.WriteJSON(v); err != nil {
 			errs = append(errs, err)
 		}
 	}
+
 	return errors.Join(errs...)
 }
 
@@ -221,7 +237,7 @@ func (l *Lobby) handleRegister(conn *websocket.Conn, rawJSONData json.RawMessage
 		}
 	}
 
-	newClient := &Client{Username: data.Username, hasAlreadyLoggedIn: true}
+	newClient := &Client{Username: data.Username, loggedInOnce: true}
 	l.AssignConn(conn, newClient)
 
 	token, err := l.NewToken(data.Username)
@@ -289,10 +305,12 @@ func (l *Lobby) handleLogin(conn *websocket.Conn, rawJSONData json.RawMessage) {
 	}
 
 	action := "reconnect"
-	if !client.hasAlreadyLoggedIn {
+	if !client.loggedInOnce {
 		client.Login()
 		action = "join"
 	}
+
+	client.Reconnect()
 
 	if err := l.broadcastPlayerUpdate(client.Username, action); err != nil {
 		log.Println(err)

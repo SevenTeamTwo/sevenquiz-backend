@@ -4,33 +4,59 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"sync"
 	"time"
 
+	"sevenquiz-api/internal/websocket"
+
 	"github.com/golang-jwt/jwt"
-	"github.com/gorilla/websocket"
 )
 
 type Client struct {
 	// Username is unique and used to define the lobby owner.
-	Username string
+	Username string `json:"username"`
 
 	// Score represents the user's quiz score
-	Score float64
+	Score float64 `json:"score"`
 
-	// hasAlreadyLoggedIn specifies if the client has already joined the lobby once.
-	hasAlreadyLoggedIn bool
+	// loggedInOnce specifies if the client has already joined the lobby once.
+	loggedInOnce bool
+	disconnected bool
+	mu           sync.Mutex
 }
 
 // Login defines that the client has logged in.
 // Done like so in order to never set hasAlreadyLoggedIn back to false.
 func (c *Client) Login() {
-	c.hasAlreadyLoggedIn = true
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.loggedInOnce = true
 }
 
-// HasLoggedIn returns if the client has loggied in.
+func (c *Client) Disconnect() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.disconnected = true
+}
+
+func (c *Client) IsDisconnected() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.disconnected
+}
+
+func (c *Client) Reconnect() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.disconnected = false
+}
+
+// HasLoggedIn returns if the client has logged in.
 func (c *Client) HasLoggedIn() bool {
-	return c.hasAlreadyLoggedIn
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.loggedInOnce
 }
 
 type lobbyState int
@@ -50,6 +76,7 @@ type Lobby struct {
 	Owner      string    `json:"owner"`
 	MaxPlayers int       `json:"maxPlayers"`
 	PlayerList []string  `json:"playerList"`
+
 	// TokenValidity invalidates an access token if the "tokenValidity" claim
 	// doesn't match. Since lobby ids are short-sized, it prevents previous
 	// lobby owner/players from accessing a newly created lobby with the old token.
@@ -64,22 +91,16 @@ type Lobby struct {
 }
 
 func (l *Lobby) NumConns() int {
+	if _, ok := l.clients[nil]; ok {
+		return len(l.clients) - 1
+	}
 	return len(l.clients)
 }
 
 func (l *Lobby) CloseConns() {
-	for conn := range l.clients {
-		if conn != nil {
-			conn.Close()
-		}
-	}
-}
-
-func (l *Lobby) RangeClients(f func(conn *websocket.Conn, cli *Client) bool) {
-	// TODO: Is it worth it ? GetClient instead ?
-	for conn, cli := range l.clients {
-		if ok := f(conn, cli); !ok {
-			return
+	for c := range l.clients {
+		if c != nil {
+			c.Close()
 		}
 	}
 }
@@ -92,13 +113,7 @@ func (l *Lobby) MarshalJSON() ([]byte, error) {
 		Created:    l.Created,
 		Owner:      l.Owner,
 		MaxPlayers: l.MaxPlayers,
-		PlayerList: make([]string, 0, l.NumConns()),
-	}
-	for _, client := range l.clients {
-		if client == nil {
-			continue
-		}
-		lobby.PlayerList = append(lobby.PlayerList, client.Username)
+		PlayerList: l.GetPlayerList(),
 	}
 	return json.Marshal(&lobby)
 }
@@ -115,6 +130,29 @@ func (l *Lobby) GetClient(username string) *Client {
 	return nil
 }
 
+func (l *Lobby) GetPlayerList() []string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	players := make([]string, 0, l.NumConns())
+	for _, client := range l.clients {
+		if client == nil || client.IsDisconnected() {
+			continue
+		}
+		players = append(players, client.Username)
+	}
+
+	sort.Strings(players)
+
+	return players
+}
+
+func (l *Lobby) GetClientFromConn(conn *websocket.Conn) *Client {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.clients[conn]
+}
+
 func (l *Lobby) SetState(state lobbyState) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -128,6 +166,7 @@ func (l *Lobby) AssignConn(conn *websocket.Conn, client *Client) {
 	if l.clients == nil {
 		l.clients = make(map[*websocket.Conn]*Client)
 	}
+
 	l.clients[conn] = client
 }
 

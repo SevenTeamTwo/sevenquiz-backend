@@ -17,6 +17,8 @@ func (l *Lobbies) Register(id string, newLobby *Lobby) {
 }
 
 func (l *Lobbies) Get(id string) *Lobby {
+	l.mu.Lock()
+	defer l.mu.Unlock()
 	return l.lobbies[id]
 }
 
