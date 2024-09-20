@@ -52,8 +52,9 @@ func newTestLobby(lobbies *quiz.Lobbies) *quiz.Lobby {
 	return lobby
 }
 
-func setupAndDialTestServer(pattern string, handler http.HandlerFunc, path string) (*httptest.Server, *websocket.Conn, error) {
-	s := setupTestServer(pattern, handler)
+// param named "_pattern" to avoid unparam linter FP until new pattern is tested.
+func setupAndDialTestServer(_pattern string, handler http.HandlerFunc, path string) (*httptest.Server, *websocket.Conn, error) {
+	s := setupTestServer(_pattern, handler)
 	conn, err := dialTestServerWS(s, path)
 
 	return s, conn, err
@@ -76,6 +77,32 @@ func dialTestServerWS(s *httptest.Server, path string) (*websocket.Conn, error) 
 	defer res.Body.Close()
 
 	return conn, nil
+}
+
+func TestLobbyCreate(t *testing.T) {
+	var (
+		req     = httptest.NewRequest(http.MethodPost, "/lobby?username=me", nil)
+		res     = httptest.NewRecorder()
+		lobbies = &quiz.Lobbies{}
+	)
+
+	quiz.CreateLobbyHandler(defaultTestConfig, lobbies)(res, req)
+
+	apiRes := res.Result()
+	defer apiRes.Body.Close()
+
+	assertEqual(t, apiRes.StatusCode, http.StatusOK)
+
+	resJSON := api.CreateLobbyResponse{}
+	if err := json.NewDecoder(res.Body).Decode(&resJSON); err != nil {
+		t.Fatalf("%v", err)
+	}
+
+	lobby := lobbies.Get(resJSON.LobbyID)
+	assertNotNil(t, lobby)
+
+	_, err := lobby.CheckToken(defaultTestConfig, resJSON.Token)
+	assertNil(t, err)
 }
 
 func TestLobbyBanner(t *testing.T) {
