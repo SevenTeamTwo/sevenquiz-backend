@@ -7,23 +7,13 @@ import (
 	"os"
 	"time"
 
+	"sevenquiz-api/internal/config"
 	"sevenquiz-api/internal/middleware"
 	"sevenquiz-api/internal/quiz"
 
 	"github.com/MadAppGang/httplog"
 	"github.com/gorilla/websocket"
 	"github.com/rs/cors"
-)
-
-var (
-	defaultMaxPlayers   = 25
-	defaultLobbyTimeout = 15 * time.Minute
-	defaultUpgrader     = websocket.Upgrader{
-		HandshakeTimeout: 15 * time.Second,
-		CheckOrigin: func(_ *http.Request) bool {
-			return true // Accepting all requests
-		},
-	}
 )
 
 func init() {
@@ -43,11 +33,22 @@ func init() {
 }
 
 func main() {
-	lobbies := &quiz.Lobbies{}
+	cfg, err := config.LoadConfig("") // TODO: config flags
+	if err != nil {
+		log.Fatal(err)
+	}
 
-	createLobbyHandler := quiz.CreateLobbyHandler(lobbies, defaultMaxPlayers, defaultLobbyTimeout)
+	lobbies := &quiz.Lobbies{}
+	upgrader := websocket.Upgrader{
+		HandshakeTimeout: 15 * time.Second,
+		CheckOrigin: func(_ *http.Request) bool {
+			return true // Accepting all requests
+		},
+	}
+
+	createLobbyHandler := quiz.CreateLobbyHandler(cfg, lobbies)
 	http.Handle("POST /lobby", middleware.ApplyDefaults(createLobbyHandler))
-	http.Handle("GET /lobby/{id}", middleware.ApplyDefaults(quiz.LobbyHandler(lobbies, defaultUpgrader)))
+	http.Handle("GET /lobby/{id}", middleware.ApplyDefaults(quiz.LobbyHandler(cfg, lobbies, upgrader)))
 
 	srv := http.Server{
 		Addr:         ":8080",

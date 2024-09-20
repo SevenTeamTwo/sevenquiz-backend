@@ -100,6 +100,7 @@ linters-settings:
     exclude-functions:
       - (net/http.ResponseWriter).Write
       - (io.ReadCloser).Close
+      - (*sevenquiz-api/internal/websocket.Conn).Close
       - (*github.com/gorilla/websocket.Conn).Close
       - (*github.com/gorilla/websocket.Conn).WriteMessage
       - (*github.com/gorilla/websocket.Conn).WriteJSON

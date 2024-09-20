@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"sevenquiz-api/api"
+	"sevenquiz-api/internal/config"
 	apierrs "sevenquiz-api/internal/errors"
 	"sevenquiz-api/internal/websocket"
 	"time"
@@ -16,7 +17,7 @@ import (
 	"github.com/lithammer/shortuuid/v3"
 )
 
-func CreateLobbyHandler(lobbies *Lobbies, maxPlayers int, lobbyTimeout time.Duration) http.HandlerFunc {
+func CreateLobbyHandler(cfg config.Config, lobbies *Lobbies) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		username := r.URL.Query().Get("username")
 		if err := checkUsername(username); err != nil {
@@ -43,9 +44,8 @@ func CreateLobbyHandler(lobbies *Lobbies, maxPlayers int, lobbyTimeout time.Dura
 					ID:            lobbyID,
 					Created:       time.Now(),
 					Owner:         username,
-					MaxPlayers:    maxPlayers,
+					MaxPlayers:    cfg.Lobby.MaxPlayers,
 					TokenValidity: tokenValidity,
-					TokenSecret:   []byte("myjwtsecret1234"),
 				}
 				lobbies.Register(newLobby.ID, newLobby)
 
@@ -53,7 +53,7 @@ func CreateLobbyHandler(lobbies *Lobbies, maxPlayers int, lobbyTimeout time.Dura
 			}
 		}
 
-		token, err := newLobby.NewToken(username)
+		token, err := newLobby.NewToken(cfg, username)
 		if err != nil {
 			lobbies.Delete(newLobby.ID)
 			apierrs.HTTPErrorResponse(w, http.StatusInternalServerError, err, apierrs.InternalServerError())
@@ -76,7 +76,7 @@ func CreateLobbyHandler(lobbies *Lobbies, maxPlayers int, lobbyTimeout time.Dura
 
 		// Lobby timeout
 		go func() {
-			<-time.After(lobbyTimeout)
+			<-time.After(cfg.Lobby.RegisterTimeout)
 			if newLobby.state == LobbyStateCreated || newLobby.state == LobbyStateRegister {
 				// TODO: broadcast to conns before ?
 				lobbies.Delete(newLobby.ID)
@@ -96,7 +96,7 @@ func (l *Lobby) writeBanner(conn *websocket.Conn) error {
 	return conn.WriteJSON(res)
 }
 
-func (l *Lobby) handle(conn *websocket.Conn) {
+func (l *Lobby) handle(cfg config.Config, conn *websocket.Conn) {
 	if err := l.writeBanner(conn); err != nil {
 		log.Println(err)
 		conn.Close()
@@ -128,9 +128,9 @@ func (l *Lobby) handle(conn *websocket.Conn) {
 				return
 			}
 		case api.RequestTypeRegister:
-			l.handleRegister(conn, req.Data)
+			l.handleRegister(cfg, conn, req.Data)
 		case api.RequestTypeLogin:
-			l.handleLogin(conn, req.Data)
+			l.handleLogin(cfg, conn, req.Data)
 		default:
 			apierrs.WebsocketErrorResponse(conn, nil, apierrs.InvalidRequestError("unknown request type"))
 			continue
@@ -138,7 +138,7 @@ func (l *Lobby) handle(conn *websocket.Conn) {
 	} // TODO: on start, goto next phase
 }
 
-func LobbyHandler(lobbies *Lobbies, upgrader gws.Upgrader) http.HandlerFunc {
+func LobbyHandler(cfg config.Config, lobbies *Lobbies, upgrader gws.Upgrader) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		id := r.PathValue("id")
 		if id == "" {
@@ -177,7 +177,7 @@ func LobbyHandler(lobbies *Lobbies, upgrader gws.Upgrader) http.HandlerFunc {
 			wsConn.Close()
 		}()
 
-		lobby.handle(wsConn)
+		lobby.handle(cfg, wsConn)
 	}
 }
 
@@ -209,7 +209,7 @@ func (l *Lobby) broadcastPlayerUpdate(username, action string) error {
 	return l.broadcast(res)
 }
 
-func (l *Lobby) handleRegister(conn *websocket.Conn, rawJSONData json.RawMessage) {
+func (l *Lobby) handleRegister(cfg config.Config, conn *websocket.Conn, rawJSONData json.RawMessage) {
 	data := api.RegisterRequestData{}
 	if err := json.Unmarshal(rawJSONData, &data); err != nil {
 		apierrs.WebsocketErrorResponse(conn, err, apierrs.InvalidRequestError("invalid register request"))
@@ -240,7 +240,7 @@ func (l *Lobby) handleRegister(conn *websocket.Conn, rawJSONData json.RawMessage
 	newClient := &Client{Username: data.Username, loggedInOnce: true}
 	l.AssignConn(conn, newClient)
 
-	token, err := l.NewToken(data.Username)
+	token, err := l.NewToken(cfg, data.Username)
 	if err != nil {
 		apierrs.WebsocketErrorResponse(conn, err, apierrs.UsernameAlreadyExistsError())
 		return
@@ -262,14 +262,14 @@ func (l *Lobby) handleRegister(conn *websocket.Conn, rawJSONData json.RawMessage
 	}
 }
 
-func (l *Lobby) handleLogin(conn *websocket.Conn, rawJSONData json.RawMessage) {
+func (l *Lobby) handleLogin(cfg config.Config, conn *websocket.Conn, rawJSONData json.RawMessage) {
 	data := api.LoginRequestData{}
 	if err := json.Unmarshal(rawJSONData, &data); err != nil {
 		apierrs.WebsocketErrorResponse(conn, err, apierrs.InvalidRequestError("invalid login request"))
 		return
 	}
 
-	claims, err := l.CheckToken(data.Token)
+	claims, err := l.CheckToken(cfg, data.Token)
 	if err != nil {
 		apierrs.WebsocketErrorResponse(conn, err, apierrs.InvalidTokenError())
 		return

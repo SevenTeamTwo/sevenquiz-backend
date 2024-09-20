@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"sevenquiz-api/internal/config"
 	"sevenquiz-api/internal/websocket"
 
 	"github.com/golang-jwt/jwt"
@@ -69,7 +70,6 @@ const (
 	LobbyStateEnded
 )
 
-// TODO: better way to instantiate a lobby since exposed token secret.
 type Lobby struct {
 	ID         string    `json:"id"`
 	Created    time.Time `json:"created"`
@@ -81,7 +81,6 @@ type Lobby struct {
 	// doesn't match. Since lobby ids are short-sized, it prevents previous
 	// lobby owner/players from accessing a newly created lobby with the old token.
 	TokenValidity string `json:"-"`
-	TokenSecret   []byte `json:"-"`
 
 	// clients represents all the active websockets in a lobby.
 	// A client != nil means a conn has registered.
@@ -204,21 +203,21 @@ func (l *Lobby) DeleteConn(conn *websocket.Conn) {
 	delete(l.clients, conn)
 }
 
-func (l *Lobby) NewToken(username string) (string, error) {
+func (l *Lobby) NewToken(cfg config.Config, username string) (string, error) {
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
 		"lobbyId":       l.ID,
 		"tokenValidity": l.TokenValidity,
 		"username":      username,
 	})
-	return token.SignedString(l.TokenSecret)
+	return token.SignedString(cfg.JWTSecret)
 }
 
-func (l *Lobby) CheckToken(token string) (claims jwt.MapClaims, err error) {
+func (l *Lobby) CheckToken(cfg config.Config, token string) (claims jwt.MapClaims, err error) {
 	jwtToken, err := jwt.Parse(token, func(token *jwt.Token) (any, error) {
 		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
 			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
 		}
-		return l.TokenSecret, nil
+		return cfg.JWTSecret, nil
 	})
 	if err != nil {
 		return nil, err

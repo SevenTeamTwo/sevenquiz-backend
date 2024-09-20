@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"reflect"
 	"sevenquiz-api/api"
+	"sevenquiz-api/internal/config"
 	apierrs "sevenquiz-api/internal/errors"
 	"sevenquiz-api/internal/quiz"
 	"strings"
@@ -25,6 +26,14 @@ func init() {
 	log.SetOutput(io.Discard)
 }
 
+var defaultTestConfig = config.Config{
+	JWTSecret: []byte("myjwtsecret1234"),
+	Lobby: config.LobbyConf{
+		MaxPlayers:      25,
+		RegisterTimeout: 15 * time.Second,
+	},
+}
+
 func newTestLobby(lobbies *quiz.Lobbies) *quiz.Lobby {
 	lobby := &quiz.Lobby{
 		ID:            "12345",
@@ -32,7 +41,6 @@ func newTestLobby(lobbies *quiz.Lobbies) *quiz.Lobby {
 		Owner:         "me",
 		MaxPlayers:    25,
 		TokenValidity: shortuuid.New(),
-		TokenSecret:   []byte("myjwtsecret1234"),
 	}
 
 	// Assign lobby owner
@@ -82,7 +90,7 @@ func TestLobbyBanner(t *testing.T) {
 		}
 	)
 
-	s, conn, err := setupAndDialTestServer("GET /lobby/{id}", quiz.LobbyHandler(lobbies, upgrader), "/lobby/"+lobby.ID)
+	s, conn, err := setupAndDialTestServer("GET /lobby/{id}", quiz.LobbyHandler(defaultTestConfig, lobbies, upgrader), "/lobby/"+lobby.ID)
 	if err != nil {
 		t.Fatalf("%v", err)
 	}
@@ -122,7 +130,7 @@ func TestLobbyRegister(t *testing.T) {
 		}
 	)
 
-	s, conn, err := setupAndDialTestServer("GET /lobby/{id}", quiz.LobbyHandler(lobbies, upgrader), "/lobby/"+lobby.ID)
+	s, conn, err := setupAndDialTestServer("GET /lobby/{id}", quiz.LobbyHandler(defaultTestConfig, lobbies, upgrader), "/lobby/"+lobby.ID)
 	if err != nil {
 		t.Fatalf("%v", err)
 	}
@@ -160,7 +168,7 @@ func TestLobbyRegister(t *testing.T) {
 		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
 			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
 		}
-		return lobby.TokenSecret, nil
+		return defaultTestConfig.JWTSecret, nil
 	})
 	if err != nil {
 		t.Fatalf("%v", err)
@@ -238,7 +246,7 @@ func TestLobbyLogin(t *testing.T) {
 
 	lobby.AssignConn(nil, cli)
 
-	s, conn, err := setupAndDialTestServer("GET /lobby/{id}", quiz.LobbyHandler(lobbies, upgrader), "/lobby/"+lobby.ID)
+	s, conn, err := setupAndDialTestServer("GET /lobby/{id}", quiz.LobbyHandler(defaultTestConfig, lobbies, upgrader), "/lobby/"+lobby.ID)
 	if err != nil {
 		t.Fatalf("%v", err)
 	}
@@ -251,7 +259,7 @@ func TestLobbyLogin(t *testing.T) {
 	}
 
 	// Generate token with "username" claim and tokenValidity.
-	token, err := lobby.NewToken(loginUsername)
+	token, err := lobby.NewToken(defaultTestConfig, loginUsername)
 	if err != nil {
 		t.Fatalf("%v", err)
 	}
@@ -350,15 +358,15 @@ func TestLobbyLogin(t *testing.T) {
 
 func TestLobbyTimeout(t *testing.T) {
 	var (
-		req = httptest.NewRequest(http.MethodPost, "/lobby?username=me", nil)
-		res = httptest.NewRecorder()
-
-		lobbies      = &quiz.Lobbies{}
-		maxPlayers   = 25
-		lobbyTimeout = time.Duration(0)
+		req     = httptest.NewRequest(http.MethodPost, "/lobby?username=me", nil)
+		res     = httptest.NewRecorder()
+		lobbies = &quiz.Lobbies{}
 	)
 
-	quiz.CreateLobbyHandler(lobbies, maxPlayers, lobbyTimeout)(res, req)
+	timeoutCfg := defaultTestConfig
+	timeoutCfg.Lobby.RegisterTimeout = time.Duration(0)
+
+	quiz.CreateLobbyHandler(timeoutCfg, lobbies)(res, req)
 
 	resJSON := api.CreateLobbyResponse{}
 	if err := json.NewDecoder(res.Body).Decode(&resJSON); err != nil {
@@ -385,7 +393,7 @@ func TestLobbyPlayerList(t *testing.T) {
 		path = "/lobby/" + lobby.ID
 	)
 
-	s, conn, err := setupAndDialTestServer("GET /lobby/{id}", quiz.LobbyHandler(lobbies, upgrader), path)
+	s, conn, err := setupAndDialTestServer("GET /lobby/{id}", quiz.LobbyHandler(defaultTestConfig, lobbies, upgrader), path)
 	assertNil(t, err)
 	defer s.Close()
 	defer conn.Close()
@@ -394,14 +402,16 @@ func TestLobbyPlayerList(t *testing.T) {
 	_, _, err = conn.ReadMessage()
 	assertNil(t, err)
 
-	var usersConn []*websocket.Conn
+	registerUsers := []string{"testuser", "testuser2", "testuser3"}
+	usersConn := make([]*websocket.Conn, 0, len(registerUsers))
+
 	defer func() {
 		for _, conn := range usersConn {
 			conn.Close()
 		}
 	}()
 
-	for _, username := range []string{"testuser", "testuser2", "testuser3"} {
+	for _, username := range registerUsers {
 		conn2, err := dialTestServerWS(s, path)
 		assertNil(t, err)
 
