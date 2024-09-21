@@ -1,7 +1,6 @@
 package quiz
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"sort"
@@ -12,6 +11,7 @@ import (
 	"sevenquiz-api/internal/websocket"
 
 	"github.com/golang-jwt/jwt"
+	"github.com/lithammer/shortuuid/v3"
 )
 
 type Client struct {
@@ -54,25 +54,37 @@ const (
 )
 
 type Lobby struct {
-	ID         string    `json:"id"`
-	Created    time.Time `json:"created"`
-	Owner      string    `json:"owner"`
-	MaxPlayers int       `json:"maxPlayers"`
-	PlayerList []string  `json:"playerList"`
+	ID         string
+	Owner      string
+	MaxPlayers int
 
-	// TokenValidity invalidates an access token if the "tokenValidity" claim
+	// tokenValidity invalidates an access token if the "tokenValidity" claim
 	// doesn't match. Since lobby ids are short-sized, it prevents previous
 	// lobby owner/players from accessing a newly created lobby with the old token.
-	TokenValidity string `json:"-"`
+	tokenValidity string
 
 	// clients represents all the active websockets in a lobby.
 	// A client != nil means a conn has registered.
 	clients map[*websocket.Conn]*Client
+	created time.Time
 	mu      sync.Mutex
 	state   lobbyState
 }
 
+func (l *Lobby) Init() {
+	l.tokenValidity = shortuuid.New()
+	l.created = time.Now()
+	l.clients = map[*websocket.Conn]*Client{}
+	l.state = LobbyStateCreated
+}
+
 func (l *Lobby) NumConns() int {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.numConns()
+}
+
+func (l *Lobby) numConns() int {
 	if _, ok := l.clients[nil]; ok {
 		return len(l.clients) - 1
 	}
@@ -80,24 +92,17 @@ func (l *Lobby) NumConns() int {
 }
 
 func (l *Lobby) CloseConns() {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.closeConns()
+}
+
+func (l *Lobby) closeConns() {
 	for c := range l.clients {
 		if c != nil {
 			c.Close()
 		}
 	}
-}
-
-type jsonLobby Lobby
-
-func (l *Lobby) MarshalJSON() ([]byte, error) {
-	lobby := jsonLobby{
-		ID:         l.ID,
-		Created:    l.Created,
-		Owner:      l.Owner,
-		MaxPlayers: l.MaxPlayers,
-		PlayerList: l.GetPlayerList(),
-	}
-	return json.Marshal(&lobby)
 }
 
 func (l *Lobby) GetClient(username string) (*websocket.Conn, *Client, bool) {
@@ -122,7 +127,7 @@ func (l *Lobby) GetPlayerList() []string {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
-	players := make([]string, 0, l.NumConns())
+	players := make([]string, 0, l.numConns())
 	for _, client := range l.clients {
 		if client == nil || !client.Alive() {
 			continue
@@ -147,17 +152,15 @@ func (l *Lobby) SetState(state lobbyState) {
 	l.state = state
 }
 
+func (l *Lobby) SetTokenValidity(tv string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.tokenValidity = tv
+}
+
 func (l *Lobby) AssignConn(client *Client, conn *websocket.Conn) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	l.assignConn(client, conn)
-}
-
-func (l *Lobby) assignConn(client *Client, conn *websocket.Conn) {
-	if l.clients == nil {
-		l.clients = make(map[*websocket.Conn]*Client)
-	}
-
 	l.clients[conn] = client
 }
 
@@ -180,7 +183,7 @@ func (l *Lobby) ReplaceConn(client *Client, newConn *websocket.Conn) (oldConn *w
 	}
 
 	l.deleteConn(oldConn)
-	l.assignConn(client, newConn)
+	l.clients[newConn] = client
 
 	return oldConn, replaced
 }
@@ -201,41 +204,57 @@ func (l *Lobby) deleteConn(conn *websocket.Conn) {
 func (l *Lobby) NewToken(cfg config.Config, username string) (string, error) {
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
 		"lobbyId":       l.ID,
-		"tokenValidity": l.TokenValidity,
+		"tokenValidity": l.tokenValidity,
 		"username":      username,
 	})
 	return token.SignedString(cfg.JWTSecret)
 }
 
-func (l *Lobby) CheckToken(cfg config.Config, token string) (claims jwt.MapClaims, err error) {
-	jwtToken, err := jwt.Parse(token, func(token *jwt.Token) (any, error) {
+func GetStringClaim(claims jwt.MapClaims, claim string) (string, bool) {
+	claimAny, ok := claims[claim]
+	if !ok {
+		return "", false
+	}
+	claimStr, ok := claimAny.(string)
+
+	return claimStr, ok
+}
+
+func JWTKeyFunc(cfg config.Config) jwt.Keyfunc {
+	return func(token *jwt.Token) (any, error) {
 		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
 			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
 		}
 		return cfg.JWTSecret, nil
-	})
+	}
+}
+
+func (l *Lobby) CheckToken(cfg config.Config, token string) (jwt.MapClaims, error) {
+	jwtToken, err := jwt.Parse(token, JWTKeyFunc(cfg))
 	if err != nil {
 		return nil, err
 	}
 
-	claims, ok := jwtToken.Claims.(jwt.MapClaims)
+	claimsMap, ok := jwtToken.Claims.(jwt.MapClaims)
 	if !ok {
-		return nil, errors.New("could not assert jwt claims")
+		return nil, errors.New("invalid jwt claims")
 	}
-	lobbyID, ok := claims["lobbyId"].(string)
+
+	lobbyID, ok := GetStringClaim(claimsMap, "lobbyId")
 	if !ok {
 		return nil, errors.New("token has no lobbyId claim")
 	}
 	if lobbyID != l.ID {
 		return nil, errors.New("token does not match lobby id")
 	}
-	tokenValidity, ok := claims["tokenValidity"].(string)
+
+	tokenValidity, ok := GetStringClaim(claimsMap, "tokenValidity")
 	if !ok {
 		return nil, errors.New("token has no tokenValidity claim")
 	}
-	if tokenValidity != l.TokenValidity {
+	if tokenValidity != l.tokenValidity {
 		return nil, errors.New("token does not match token validity")
 	}
 
-	return claims, nil
+	return claimsMap, nil
 }

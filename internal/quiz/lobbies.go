@@ -10,9 +10,12 @@ type Lobbies struct {
 func (l *Lobbies) Register(id string, newLobby *Lobby) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
+
 	if l.lobbies == nil {
 		l.lobbies = map[string]*Lobby{}
 	}
+
+	newLobby.Init()
 	l.lobbies[id] = newLobby
 }
 
@@ -27,8 +30,8 @@ func (l *Lobbies) Delete(id string) {
 	defer l.mu.Unlock()
 
 	lobby := l.lobbies[id]
-	if lobby != nil && lobby.NumConns() > 0 {
-		lobby.CloseConns()
+	if lobby != nil {
+		defer lobby.CloseConns()
 	}
 
 	delete(l.lobbies, id)

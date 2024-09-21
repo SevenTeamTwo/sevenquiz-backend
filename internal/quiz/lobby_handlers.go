@@ -12,6 +12,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/go-viper/mapstructure/v2"
 	gws "github.com/gorilla/websocket"
 
 	"github.com/lithammer/shortuuid/v3"
@@ -37,15 +38,12 @@ func CreateLobbyHandler(cfg config.Config, lobbies *Lobbies) http.HandlerFunc {
 			}
 
 			lobbyID = lobbyID[:5]
-			tokenValidity := shortuuid.New()
 
 			if l := lobbies.Get(lobbyID); l == nil {
 				newLobby = &Lobby{
-					ID:            lobbyID,
-					Created:       time.Now(),
-					Owner:         username,
-					MaxPlayers:    cfg.Lobby.MaxPlayers,
-					TokenValidity: tokenValidity,
+					ID:         lobbyID,
+					Owner:      username,
+					MaxPlayers: cfg.Lobby.MaxPlayers,
 				}
 				lobbies.Register(newLobby.ID, newLobby)
 
@@ -85,15 +83,23 @@ func CreateLobbyHandler(cfg config.Config, lobbies *Lobbies) http.HandlerFunc {
 	}
 }
 
-func (l *Lobby) writeBanner(conn *websocket.Conn) error {
-	if conn == nil {
-		return errors.New("nil websocket")
+func (l *Lobby) LobbyToRoomResponse() api.RoomData {
+	return api.RoomData{
+		ID:         l.ID,
+		Owner:      l.Owner,
+		MaxPlayers: l.MaxPlayers,
+		PlayerList: l.GetPlayerList(),
 	}
+}
+
+func (l *Lobby) handleRoom(conn *websocket.Conn) {
 	res := api.Response{
-		Type: api.ResponseRoom,
-		Data: l,
+		Type: api.ResponseTypeRoom,
+		Data: l.LobbyToRoomResponse(),
 	}
-	return conn.WriteJSON(res)
+	if err := conn.WriteJSON(res); err != nil {
+		log.Println(err)
+	}
 }
 
 func (l *Lobby) handle(cfg config.Config, conn *websocket.Conn) {
@@ -106,11 +112,7 @@ func (l *Lobby) handle(cfg config.Config, conn *websocket.Conn) {
 		conn.Close()
 	}()
 
-	if err := l.writeBanner(conn); err != nil {
-		log.Println(err)
-		conn.Close()
-		return
-	}
+	l.handleRoom(conn)
 
 	for {
 		req := api.Request{}
@@ -133,11 +135,8 @@ func (l *Lobby) handle(cfg config.Config, conn *websocket.Conn) {
 		}
 
 		switch req.Type {
-		case api.RequestRoom:
-			if err := l.writeBanner(conn); err != nil {
-				log.Println(err)
-				return
-			}
+		case api.RequestTypeRoom:
+			l.handleRoom(conn)
 		case api.RequestTypeRegister:
 			l.handleRegister(cfg, conn, req.Data)
 		case api.RequestTypeLogin:
@@ -202,7 +201,7 @@ func (l *Lobby) broadcast(v any) error {
 
 func (l *Lobby) broadcastPlayerUpdate(username, action string) error {
 	res := api.Response{
-		Type: api.ResponseLobbyUpdate,
+		Type: api.ResponseTypeLobbyUpdate,
 		Data: api.LobbyUpdateResponseData{
 			Username: username,
 			Action:   action,
@@ -211,9 +210,14 @@ func (l *Lobby) broadcastPlayerUpdate(username, action string) error {
 	return l.broadcast(res)
 }
 
-func (l *Lobby) handleRegister(cfg config.Config, conn *websocket.Conn, rawJSONData json.RawMessage) {
+func (l *Lobby) handleRegister(cfg config.Config, conn *websocket.Conn, reqData any) {
+	reqDataMap, ok := reqData.(map[string]any)
+	if !ok {
+		apierrs.WebsocketErrorResponse(conn, nil, apierrs.InvalidRequestError("invalid register request"))
+		return
+	}
 	data := api.RegisterRequestData{}
-	if err := json.Unmarshal(rawJSONData, &data); err != nil {
+	if err := mapstructure.Decode(reqDataMap, &data); err != nil {
 		apierrs.WebsocketErrorResponse(conn, err, apierrs.InvalidRequestError("invalid register request"))
 		return
 	}
@@ -264,9 +268,14 @@ func (l *Lobby) handleRegister(cfg config.Config, conn *websocket.Conn, rawJSOND
 	}
 }
 
-func (l *Lobby) handleLogin(cfg config.Config, conn *websocket.Conn, rawJSONData json.RawMessage) {
+func (l *Lobby) handleLogin(cfg config.Config, conn *websocket.Conn, reqData any) {
+	reqDataMap, ok := reqData.(map[string]any)
+	if !ok {
+		apierrs.WebsocketErrorResponse(conn, nil, apierrs.InvalidRequestError("invalid login request"))
+		return
+	}
 	data := api.LoginRequestData{}
-	if err := json.Unmarshal(rawJSONData, &data); err != nil {
+	if err := mapstructure.Decode(reqDataMap, &data); err != nil {
 		apierrs.WebsocketErrorResponse(conn, err, apierrs.InvalidRequestError("invalid login request"))
 		return
 	}
@@ -283,7 +292,6 @@ func (l *Lobby) handleLogin(cfg config.Config, conn *websocket.Conn, rawJSONData
 	if ok {
 		username, ok = usernameClaim.(string)
 	}
-
 	if !ok || username == "" {
 		apierrs.WebsocketErrorResponse(conn, nil, apierrs.InvalidTokenClaimError("username"))
 		return
@@ -301,7 +309,6 @@ func (l *Lobby) handleLogin(cfg config.Config, conn *websocket.Conn, rawJSONData
 		Type:    api.ResponseTypeLogin,
 		Message: "login successful",
 	}
-
 	if err := conn.WriteJSON(res); err != nil {
 		log.Println(err)
 	}
