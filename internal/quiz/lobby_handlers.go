@@ -63,7 +63,7 @@ func CreateLobbyHandler(cfg config.Config, lobbies *Lobbies) http.HandlerFunc {
 
 		// Owner has not upgraded to websocket yet, register a nil conn
 		// in order to retrieve it on login.
-		newLobby.AssignConn(&Client{Username: username, disconnected: true}, nil)
+		newLobby.AssignConn(&Client{Username: username}, nil)
 
 		res := api.CreateLobbyResponse{
 			LobbyID: newLobby.ID,
@@ -239,7 +239,7 @@ func (l *Lobby) handleRegister(cfg config.Config, conn *websocket.Conn, rawJSOND
 		}
 	}
 
-	newClient := &Client{Username: data.Username}
+	newClient := &Client{Username: data.Username, alive: true}
 	l.AssignConn(newClient, conn)
 
 	token, err := l.NewToken(cfg, data.Username)
@@ -312,7 +312,7 @@ func (l *Lobby) handleLogin(cfg config.Config, conn *websocket.Conn, rawJSONData
 		action = "join"
 	}
 
-	client.Reconnect()
+	client.Connect()
 
 	if err := l.broadcastPlayerUpdate(client.Username, action); err != nil {
 		log.Println(err)

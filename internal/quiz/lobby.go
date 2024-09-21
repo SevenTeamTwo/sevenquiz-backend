@@ -21,26 +21,26 @@ type Client struct {
 	// Score represents the user's quiz score
 	Score float64 `json:"score"`
 
-	disconnected bool
-	mu           sync.Mutex
+	alive bool
+	mu    sync.Mutex
 }
 
 func (c *Client) Disconnect() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.disconnected = true
+	c.alive = false
 }
 
-func (c *Client) IsDisconnected() bool {
+func (c *Client) Alive() bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return c.disconnected
+	return c.alive
 }
 
-func (c *Client) Reconnect() {
+func (c *Client) Connect() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.disconnected = false
+	c.alive = true
 }
 
 type lobbyState int
@@ -124,7 +124,7 @@ func (l *Lobby) GetPlayerList() []string {
 
 	players := make([]string, 0, l.NumConns())
 	for _, client := range l.clients {
-		if client == nil || client.IsDisconnected() {
+		if client == nil || !client.Alive() {
 			continue
 		}
 		players = append(players, client.Username)
