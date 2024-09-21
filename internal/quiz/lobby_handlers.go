@@ -12,7 +12,6 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/go-viper/mapstructure/v2"
 	gws "github.com/gorilla/websocket"
 
 	"github.com/lithammer/shortuuid/v3"
@@ -211,13 +210,8 @@ func (l *Lobby) broadcastPlayerUpdate(username, action string) error {
 }
 
 func (l *Lobby) handleRegister(cfg config.Config, conn *websocket.Conn, reqData any) {
-	reqDataMap, ok := reqData.(map[string]any)
-	if !ok {
-		apierrs.WebsocketErrorResponse(conn, nil, apierrs.InvalidRequestError("invalid register request"))
-		return
-	}
 	data := api.RegisterRequestData{}
-	if err := mapstructure.Decode(reqDataMap, &data); err != nil {
+	if err := api.DecodeJSON(reqData, &data); err != nil {
 		apierrs.WebsocketErrorResponse(conn, err, apierrs.InvalidRequestError("invalid register request"))
 		return
 	}
@@ -269,13 +263,8 @@ func (l *Lobby) handleRegister(cfg config.Config, conn *websocket.Conn, reqData 
 }
 
 func (l *Lobby) handleLogin(cfg config.Config, conn *websocket.Conn, reqData any) {
-	reqDataMap, ok := reqData.(map[string]any)
-	if !ok {
-		apierrs.WebsocketErrorResponse(conn, nil, apierrs.InvalidRequestError("invalid login request"))
-		return
-	}
 	data := api.LoginRequestData{}
-	if err := mapstructure.Decode(reqDataMap, &data); err != nil {
+	if err := api.DecodeJSON(reqData, &data); err != nil {
 		apierrs.WebsocketErrorResponse(conn, err, apierrs.InvalidRequestError("invalid login request"))
 		return
 	}

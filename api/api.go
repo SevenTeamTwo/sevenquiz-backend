@@ -1,7 +1,7 @@
 package api
 
 import (
-	"github.com/go-viper/mapstructure/v2"
+	"encoding/json"
 )
 
 const (
@@ -18,13 +18,12 @@ type Response struct {
 	Data    any    `json:"data,omitempty"`
 }
 
-func (r *Response) CmdData() map[string]any {
-	// TODO: review.
-	d, ok := r.Data.(map[string]any)
-	if !ok {
-		return map[string]any{}
+func DecodeJSON(data, v any) error {
+	b, err := json.Marshal(data)
+	if err != nil {
+		return err
 	}
-	return d
+	return json.Unmarshal(b, v)
 }
 
 const (
@@ -45,9 +44,9 @@ type ErrorData struct {
 	Extra   any    `json:"extra,omitempty"`
 }
 
-func DecodeErrorData(data map[string]any) (ErrorData, error) {
+func DecodeErrorData(data any) (ErrorData, error) {
 	res := ErrorData{}
-	err := mapstructure.Decode(data, &res)
+	err := DecodeJSON(data, &res)
 	return res, err
 }
 
@@ -58,9 +57,9 @@ type RoomData struct {
 	PlayerList []string `json:"playerList"`
 }
 
-func DecodeRoomData(data map[string]any) (RoomData, error) {
+func DecodeRoomData(data any) (RoomData, error) {
 	res := RoomData{}
-	err := mapstructure.Decode(data, &res)
+	err := DecodeJSON(data, &res)
 	return res, err
 }
 
@@ -69,9 +68,9 @@ type CreateLobbyResponse struct {
 	Token   string `json:"token"`
 }
 
-func DecodeCreateLobbyResponse(data map[string]any) (CreateLobbyResponse, error) {
+func DecodeCreateLobbyResponse(data any) (CreateLobbyResponse, error) {
 	res := CreateLobbyResponse{}
-	err := mapstructure.Decode(data, &res)
+	err := DecodeJSON(data, &res)
 	return res, err
 }
 
@@ -83,9 +82,9 @@ type RegisterResponseData struct {
 	Token string `json:"token"`
 }
 
-func DecodeRegisterResponseData(data map[string]any) (RegisterResponseData, error) {
+func DecodeRegisterResponseData(data any) (RegisterResponseData, error) {
 	res := RegisterResponseData{}
-	err := mapstructure.Decode(data, &res)
+	err := DecodeJSON(data, &res)
 	return res, err
 }
 
@@ -98,8 +97,8 @@ type LobbyUpdateResponseData struct {
 	Action   string `json:"action"`
 }
 
-func DecodeLobbyUpdateResponseData(data map[string]any) (LobbyUpdateResponseData, error) {
+func DecodeLobbyUpdateResponseData(data any) (LobbyUpdateResponseData, error) {
 	res := LobbyUpdateResponseData{}
-	err := mapstructure.Decode(data, &res)
+	err := DecodeJSON(data, &res)
 	return res, err
 }

@@ -114,7 +114,7 @@ func assertRoomBanner(t *testing.T, cli *client.Client, wantRoom api.RoomData) {
 	assertNil(t, err)
 	assertEqual(t, api.ResponseTypeRoom, roomRes.Type)
 
-	roomData, err := api.DecodeRoomData(roomRes.CmdData())
+	roomData, err := api.DecodeRoomData(roomRes.Data)
 	assertNil(t, err)
 
 	assertEqualJSON(t, wantRoom, roomData)
@@ -147,7 +147,7 @@ func assertRegister(t *testing.T, cli *client.Client, lobby *quiz.Lobby, usernam
 	assertNil(t, err)
 	assertEqual(t, api.ResponseTypeRegister, res.Type)
 
-	registerData, err := api.DecodeRegisterResponseData(res.CmdData())
+	registerData, err := api.DecodeRegisterResponseData(res.Data)
 	assertNil(t, err)
 
 	claims, err := lobby.CheckToken(defaultTestConfig, registerData.Token)
@@ -164,7 +164,7 @@ func assertLobbyUpdate(t *testing.T, cli *client.Client, username, action string
 	res, err := cli.ReadResponse()
 	assertNil(t, err)
 
-	lobbyUpdateData, err := api.DecodeLobbyUpdateResponseData(res.CmdData())
+	lobbyUpdateData, err := api.DecodeLobbyUpdateResponseData(res.Data)
 	assertNil(t, err)
 
 	assertEqual(t, res.Type, api.ResponseTypeLobbyUpdate)
@@ -249,7 +249,7 @@ func TestLobbyLogin(t *testing.T) {
 	registerRes, err := cli.Register(loginUsername)
 	assertNil(t, err)
 
-	errorData, err := api.DecodeErrorData(registerRes.CmdData())
+	errorData, err := api.DecodeErrorData(registerRes.Data)
 	assertNil(t, err)
 
 	assertEqual(t, registerRes.Type, api.ResponseTypeError)
@@ -261,7 +261,7 @@ func TestLobbyLogin(t *testing.T) {
 	loginRes, err := cli.Login(token)
 	assertNil(t, err)
 
-	errorData, err = api.DecodeErrorData(loginRes.CmdData())
+	errorData, err = api.DecodeErrorData(loginRes.Data)
 	assertNil(t, err)
 	assertEqual(t, loginRes.Type, api.ResponseTypeError)
 	assertEqual(t, apierrs.InvalidTokenErrorCode, errorData.Code)
@@ -327,7 +327,7 @@ func assertRoom(t *testing.T, cli *client.Client, wantRoom api.RoomData) {
 	assertNil(t, err)
 	assertEqual(t, api.ResponseTypeRoom, res.Type)
 
-	roomData, err := api.DecodeRoomData(res.CmdData())
+	roomData, err := api.DecodeRoomData(res.Data)
 	assertNil(t, err)
 
 	assertEqualJSON(t, wantRoom, roomData)
