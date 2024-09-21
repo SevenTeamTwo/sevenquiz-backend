@@ -44,8 +44,10 @@ func newTestLobby(lobbies *quiz.Lobbies) *quiz.Lobby {
 	}
 
 	// Assign lobby owner
-	lobby.AssignConn(nil, &quiz.Client{Username: "me"})
-	lobby.GetClient("me").Disconnect()
+	lobby.AssignConn(&quiz.Client{Username: "me"}, nil)
+
+	_, client, _ := lobby.GetClient("me")
+	client.Disconnect()
 
 	lobbies.Register("12345", lobby)
 
@@ -248,9 +250,10 @@ func TestLobbyRegister(t *testing.T) {
 	assertEqualJSON(t, wantBroadcast, gotBroadcast)
 	assertEqual(t, 1, lobby.NumConns())
 
-	cli := lobby.GetClient(registerUsername)
-
+	_, cli, ok := lobby.GetClient(registerUsername)
+	assertEqual(t, true, ok)
 	assertNotNil(t, cli)
+
 	assertEqual(t, registerUsername, cli.Username)
 }
 
@@ -269,9 +272,8 @@ func TestLobbyLogin(t *testing.T) {
 
 	// Setup a client to restitute.
 	cli := &quiz.Client{Username: loginUsername}
-	cli.Login()
 
-	lobby.AssignConn(nil, cli)
+	lobby.AssignConn(cli, nil)
 
 	s, conn, err := setupAndDialTestServer("GET /lobby/{id}", quiz.LobbyHandler(defaultTestConfig, lobbies, upgrader), "/lobby/"+lobby.ID)
 	if err != nil {
@@ -327,9 +329,10 @@ func TestLobbyLogin(t *testing.T) {
 	assertEqualJSON(t, wantBroadcast, gotBroadcast)
 	assertEqual(t, 1, lobby.NumConns())
 
-	cli = lobby.GetClient(loginUsername)
-
+	_, cli, ok := lobby.GetClient(loginUsername)
+	assertEqual(t, true, ok)
 	assertNotNil(t, cli)
+
 	assertEqual(t, loginUsername, cli.Username)
 
 	// Assert error on register while already logged in.
@@ -381,6 +384,78 @@ func TestLobbyLogin(t *testing.T) {
 
 	assertEqual(t, api.ResponseTypeError, errorRes.Type)
 	assertEqual(t, apierrs.InvalidTokenErrorCode, errorRes.Data.Code)
+}
+
+func TestLobbyLoginOwner(t *testing.T) {
+	var (
+		lobbies  = &quiz.Lobbies{}
+		lobby    = newTestLobby(lobbies)
+		upgrader = websocket.Upgrader{
+			HandshakeTimeout: 15 * time.Second,
+			CheckOrigin: func(_ *http.Request) bool {
+				return true // Accepting all requests
+			},
+		}
+	)
+
+	// Setup the owner to restitute
+	cli := &quiz.Client{Username: lobby.Owner}
+
+	lobby.AssignConn(cli, nil)
+
+	s, conn, err := setupAndDialTestServer("GET /lobby/{id}", quiz.LobbyHandler(defaultTestConfig, lobbies, upgrader), "/lobby/"+lobby.ID)
+	if err != nil {
+		t.Fatalf("%v", err)
+	}
+	defer s.Close()
+	defer conn.Close()
+
+	// Discard banner
+	if _, _, err = conn.ReadMessage(); err != nil {
+		t.Fatalf("%v", err)
+	}
+
+	// Generate token with "username" claim and tokenValidity.
+	token, err := lobby.NewToken(defaultTestConfig, lobby.Owner)
+	if err != nil {
+		t.Fatalf("%v", err)
+	}
+
+	if err = writeMessagef(conn, `
+	{
+		"type": "login",
+		"data": {
+			"token": %q
+		}
+	}`, token); err != nil {
+		t.Fatalf("%v", err)
+	}
+
+	loginRes := struct {
+		Type string `json:"type,omitempty"`
+	}{}
+
+	if err := conn.ReadJSON(&loginRes); err != nil {
+		t.Fatalf("%v", err)
+	}
+	assertEqual(t, api.ResponseTypeLogin, loginRes.Type)
+
+	_, gotBroadcast, err := conn.ReadMessage()
+	if err != nil {
+		t.Fatalf("%v", err)
+	}
+
+	wantBroadcast := []byte(fmt.Sprintf(`
+	{
+		"type": "lobbyUpdate",
+		"data": {
+			"username": %q,
+			"action": "join"
+		}
+	}`, lobby.Owner))
+
+	assertEqualJSON(t, wantBroadcast, gotBroadcast)
+	assertEqual(t, 1, lobby.NumConns())
 }
 
 func TestLobbyTimeout(t *testing.T) {

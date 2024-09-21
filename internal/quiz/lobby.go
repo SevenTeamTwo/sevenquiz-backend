@@ -21,18 +21,8 @@ type Client struct {
 	// Score represents the user's quiz score
 	Score float64 `json:"score"`
 
-	// loggedInOnce specifies if the client has already joined the lobby once.
-	loggedInOnce bool
 	disconnected bool
 	mu           sync.Mutex
-}
-
-// Login defines that the client has logged in.
-// Done like so in order to never set hasAlreadyLoggedIn back to false.
-func (c *Client) Login() {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.loggedInOnce = true
 }
 
 func (c *Client) Disconnect() {
@@ -51,13 +41,6 @@ func (c *Client) Reconnect() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.disconnected = false
-}
-
-// HasLoggedIn returns if the client has logged in.
-func (c *Client) HasLoggedIn() bool {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return c.loggedInOnce
 }
 
 type lobbyState int
@@ -117,16 +100,22 @@ func (l *Lobby) MarshalJSON() ([]byte, error) {
 	return json.Marshal(&lobby)
 }
 
-func (l *Lobby) GetClient(username string) *Client {
-	for _, client := range l.clients {
+func (l *Lobby) GetClient(username string) (*websocket.Conn, *Client, bool) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.getClient(username)
+}
+
+func (l *Lobby) getClient(username string) (*websocket.Conn, *Client, bool) {
+	for conn, client := range l.clients {
 		if client == nil {
 			continue
 		}
 		if client.Username == username {
-			return client
+			return conn, client, true
 		}
 	}
-	return nil
+	return nil, nil, false
 }
 
 func (l *Lobby) GetPlayerList() []string {
@@ -158,10 +147,13 @@ func (l *Lobby) SetState(state lobbyState) {
 	l.state = state
 }
 
-func (l *Lobby) AssignConn(conn *websocket.Conn, client *Client) {
+func (l *Lobby) AssignConn(client *Client, conn *websocket.Conn) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	l.assignConn(client, conn)
+}
 
+func (l *Lobby) assignConn(client *Client, conn *websocket.Conn) {
 	if l.clients == nil {
 		l.clients = make(map[*websocket.Conn]*Client)
 	}
@@ -169,37 +161,40 @@ func (l *Lobby) AssignConn(conn *websocket.Conn, client *Client) {
 	l.clients[conn] = client
 }
 
-func (l *Lobby) ReplaceClientConn(client *Client, newConn *websocket.Conn) {
+// ReplaceConn replaces a conn for the specified client and
+// returns the oldConn with a bool describing if a replace happened.
+func (l *Lobby) ReplaceConn(client *Client, newConn *websocket.Conn) (oldConn *websocket.Conn, replaced bool) {
 	if client == nil {
-		return
+		return nil, false
 	}
 
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
-	for conn, cli := range l.clients {
-		if cli == nil {
-			continue
-		}
-		if cli.Username == client.Username {
-			if conn != nil {
-				conn.Close()
-			}
-			delete(l.clients, conn)
-		}
+	oldConn, _, replaced = l.getClient(client.Username)
+	if !replaced {
+		return nil, replaced
+	}
+	if oldConn != nil {
+		oldConn.Close()
 	}
 
-	l.clients[newConn] = client
+	l.deleteConn(oldConn)
+	l.assignConn(client, newConn)
+
+	return oldConn, replaced
 }
 
 func (l *Lobby) DeleteConn(conn *websocket.Conn) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	l.deleteConn(conn)
+}
 
+func (l *Lobby) deleteConn(conn *websocket.Conn) {
 	if conn != nil {
 		conn.Close()
 	}
-
 	delete(l.clients, conn)
 }
 

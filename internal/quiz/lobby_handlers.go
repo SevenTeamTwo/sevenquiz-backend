@@ -63,7 +63,7 @@ func CreateLobbyHandler(cfg config.Config, lobbies *Lobbies) http.HandlerFunc {
 
 		// Owner has not upgraded to websocket yet, register a nil conn
 		// in order to retrieve it on login.
-		newLobby.AssignConn(nil, &Client{Username: username, disconnected: true})
+		newLobby.AssignConn(&Client{Username: username, disconnected: true}, nil)
 
 		res := api.CreateLobbyResponse{
 			LobbyID: newLobby.ID,
@@ -97,6 +97,15 @@ func (l *Lobby) writeBanner(conn *websocket.Conn) error {
 }
 
 func (l *Lobby) handle(cfg config.Config, conn *websocket.Conn) {
+	l.AssignConn(nil, conn)
+
+	defer func() {
+		if c := l.GetClientFromConn(conn); c != nil {
+			c.Disconnect()
+		}
+		conn.Close()
+	}()
+
 	if err := l.writeBanner(conn); err != nil {
 		log.Println(err)
 		conn.Close()
@@ -107,12 +116,14 @@ func (l *Lobby) handle(cfg config.Config, conn *websocket.Conn) {
 		req := api.Request{}
 		if err := conn.ReadJSON(&req); err != nil { // Blocks until next request
 			defer conn.Close()
+
 			apierrs.WebsocketErrorResponse(conn, err, apierrs.InvalidRequestError("bad json"))
 
 			disconnectClient, exist := l.clients[conn]
 			if !exist || disconnectClient == nil {
 				return
 			}
+
 			err = l.broadcastPlayerUpdate(disconnectClient.Username, "disconnect")
 			if err != nil {
 				log.Println(err)
@@ -167,15 +178,6 @@ func LobbyHandler(cfg config.Config, lobbies *Lobbies, upgrader gws.Upgrader) ht
 			return
 		}
 		wsConn := websocket.NewConn(conn)
-
-		lobby.AssignConn(wsConn, nil)
-
-		defer func() {
-			if c := lobby.GetClientFromConn(wsConn); c != nil {
-				c.Disconnect()
-			}
-			wsConn.Close()
-		}()
 
 		lobby.handle(cfg, wsConn)
 	}
@@ -237,8 +239,8 @@ func (l *Lobby) handleRegister(cfg config.Config, conn *websocket.Conn, rawJSOND
 		}
 	}
 
-	newClient := &Client{Username: data.Username, loggedInOnce: true}
-	l.AssignConn(conn, newClient)
+	newClient := &Client{Username: data.Username}
+	l.AssignConn(newClient, conn)
 
 	token, err := l.NewToken(cfg, data.Username)
 	if err != nil {
@@ -287,13 +289,13 @@ func (l *Lobby) handleLogin(cfg config.Config, conn *websocket.Conn, rawJSONData
 		return
 	}
 
-	client := l.GetClient(username)
-	if client == nil {
+	_, client, ok := l.GetClient(username)
+	if !ok {
 		apierrs.WebsocketErrorResponse(conn, nil, apierrs.ClientRestituteError("no client to resitute"))
 		return
 	}
 
-	l.ReplaceClientConn(client, conn)
+	oldConn, _ := l.ReplaceConn(client, conn)
 
 	res := api.Response{
 		Type:    api.ResponseTypeLogin,
@@ -305,8 +307,8 @@ func (l *Lobby) handleLogin(cfg config.Config, conn *websocket.Conn, rawJSONData
 	}
 
 	action := "reconnect"
-	if !client.loggedInOnce {
-		client.Login()
+	// Lobby owner's conn is assigned a nil conn before login.
+	if client.Username == l.Owner && oldConn == nil {
 		action = "join"
 	}
 
