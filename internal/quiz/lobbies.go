@@ -9,6 +9,7 @@ import (
 	"github.com/lithammer/shortuuid/v3"
 )
 
+// Lobbies acts as an in-memory container for the quiz lobbies.
 type Lobbies struct {
 	lobbies map[string]*Lobby
 	mu      sync.Mutex
@@ -30,6 +31,8 @@ type LobbyOptions struct {
 	MaxPlayers int
 }
 
+// Register tries to register a new lobby and returns an error
+// if no slots are available.
 func (l *Lobbies) Register(opts LobbyOptions) (*Lobby, error) {
 	if opts.MaxPlayers == 0 {
 		opts.MaxPlayers = 25
@@ -75,12 +78,14 @@ func newLobbyID() string {
 	return shortid[:5]
 }
 
+// Get retrieves a lobby by unique id.
 func (l *Lobbies) Get(id string) *Lobby {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	return l.lobbies[id]
 }
 
+// Delete closes all lobby conns before deleting it.
 func (l *Lobbies) Delete(id string) {
 	l.mu.Lock()
 	defer l.mu.Unlock()

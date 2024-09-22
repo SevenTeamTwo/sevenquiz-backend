@@ -16,6 +16,8 @@ import (
 	gws "github.com/gorilla/websocket"
 )
 
+// CreateLobbyHandler returns a handler capable of creating new lobbies
+// and storing them in the lobbies container.
 func CreateLobbyHandler(cfg config.Config, lobbies *quiz.Lobbies) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// A non-empty username will attribute a default owner and generate
@@ -67,6 +69,7 @@ func CreateLobbyHandler(cfg config.Config, lobbies *quiz.Lobbies) http.HandlerFu
 	}
 }
 
+// LobbyToRoomResponse converts a lobby to an API representation.
 func LobbyToRoomResponse(lobby *quiz.Lobby) api.RoomData {
 	return api.RoomData{
 		ID:         lobby.ID(),
@@ -126,6 +129,8 @@ func handle(cfg config.Config, lobby *quiz.Lobby, conn *websocket.Conn) {
 	} // TODO: on start, goto next phase
 }
 
+// LobbyHandler returns a new lobby handler and will run a complete
+// quiz game upon it's completion.
 func LobbyHandler(cfg config.Config, lobbies *quiz.Lobbies, upgrader gws.Upgrader) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		id := r.PathValue("id")

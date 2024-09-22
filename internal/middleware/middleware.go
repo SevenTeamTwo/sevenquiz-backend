@@ -25,6 +25,7 @@ type ctxKeyRequestID int
 
 const RequestIDKey ctxKeyRequestID = 0
 
+// RequestIDMiddleware assigns a new request-id when there is none set.
 func RequestIDMiddleware(h http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requestID := r.Header.Get("X-Request-ID")
@@ -40,6 +41,7 @@ func RequestIDMiddleware(h http.Handler) http.Handler {
 	})
 }
 
+// ApplyDefaults chains the default middlewares from middleware.DefaultMiddlewares.
 func ApplyDefaults(h http.Handler) http.Handler {
 	for _, mw := range DefaultMiddlewares {
 		h = mw(h)

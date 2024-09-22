@@ -1,3 +1,7 @@
+// Package websocket is a wrapper around gorilla/websocket to provide
+// thread-safe concurrent read/writes operations on websockets.
+//
+// https://pkg.go.dev/github.com/gorilla/websocket#hdr-Concurrency
 package websocket
 
 import (
@@ -6,10 +10,6 @@ import (
 	"github.com/gorilla/websocket"
 )
 
-// Conn is a wrapper around gorilla/websocket to provide thread-safe
-// read/writes operations on websockets.
-//
-// https://pkg.go.dev/github.com/gorilla/websocket#hdr-Concurrency
 type Conn struct {
 	c *websocket.Conn
 
