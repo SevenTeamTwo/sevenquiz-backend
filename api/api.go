@@ -1,8 +1,6 @@
 package api
 
-import (
-	"encoding/json"
-)
+import "encoding/json"
 
 const (
 	ResponseTypeError       = "error"
@@ -16,14 +14,6 @@ type Response struct {
 	Type    string `json:"type"`
 	Message string `json:"message,omitempty"`
 	Data    any    `json:"data,omitempty"`
-}
-
-func DecodeJSON(data, v any) error {
-	b, err := json.Marshal(data)
-	if err != nil {
-		return err
-	}
-	return json.Unmarshal(b, v)
 }
 
 const (
@@ -44,12 +34,6 @@ type ErrorData struct {
 	Extra   any    `json:"extra,omitempty"`
 }
 
-func DecodeErrorData(data any) (ErrorData, error) {
-	res := ErrorData{}
-	err := DecodeJSON(data, &res)
-	return res, err
-}
-
 type RoomData struct {
 	ID         string   `json:"id"`
 	Owner      string   `json:"owner"`
@@ -57,21 +41,9 @@ type RoomData struct {
 	PlayerList []string `json:"playerList"`
 }
 
-func DecodeRoomData(data any) (RoomData, error) {
-	res := RoomData{}
-	err := DecodeJSON(data, &res)
-	return res, err
-}
-
 type CreateLobbyResponse struct {
 	LobbyID string `json:"id"`
 	Token   string `json:"token,omitempty"`
-}
-
-func DecodeCreateLobbyResponse(data any) (CreateLobbyResponse, error) {
-	res := CreateLobbyResponse{}
-	err := DecodeJSON(data, &res)
-	return res, err
 }
 
 type RegisterRequestData struct {
@@ -80,12 +52,6 @@ type RegisterRequestData struct {
 
 type RegisterResponseData struct {
 	Token string `json:"token"`
-}
-
-func DecodeRegisterResponseData(data any) (RegisterResponseData, error) {
-	res := RegisterResponseData{}
-	err := DecodeJSON(data, &res)
-	return res, err
 }
 
 type LoginRequestData struct {
@@ -97,8 +63,14 @@ type LobbyUpdateResponseData struct {
 	Action   string `json:"action"`
 }
 
-func DecodeLobbyUpdateResponseData(data any) (LobbyUpdateResponseData, error) {
-	res := LobbyUpdateResponseData{}
-	err := DecodeJSON(data, &res)
-	return res, err
+func DecodeJSON[T any](data any) (T, error) { //nolint: ireturn
+	var res T
+	b, err := json.Marshal(data)
+	if err != nil {
+		return res, err
+	}
+	if err := json.Unmarshal(b, &res); err != nil {
+		return res, err
+	}
+	return res, nil
 }

@@ -161,9 +161,9 @@ func LobbyHandler(cfg config.Config, lobbies *quiz.Lobbies, upgrader gws.Upgrade
 	}
 }
 
-func handleRegister(cfg config.Config, lobby *quiz.Lobby, conn *websocket.Conn, reqData any) {
-	data := api.RegisterRequestData{}
-	if err := api.DecodeJSON(reqData, &data); err != nil {
+func handleRegister(cfg config.Config, lobby *quiz.Lobby, conn *websocket.Conn, data any) {
+	req, err := api.DecodeJSON[api.RegisterRequestData](data)
+	if err != nil {
 		apierrs.WebsocketErrorResponse(conn, err, apierrs.InvalidRequestError("invalid register request"))
 		return
 	}
@@ -174,24 +174,24 @@ func handleRegister(cfg config.Config, lobby *quiz.Lobby, conn *websocket.Conn, 
 		return
 	}
 
-	if err := validateUsername(data.Username); err != nil {
+	if err := validateUsername(req.Username); err != nil {
 		apierrs.WebsocketErrorResponse(conn, err, apierrs.InvalidUsernameError(err.Error()))
 		return
 	}
 
-	if _, _, exist := lobby.GetClient(data.Username); exist {
+	if _, _, exist := lobby.GetClient(req.Username); exist {
 		apierrs.WebsocketErrorResponse(conn, nil, apierrs.UsernameAlreadyExistsError())
 		return
 	}
 
-	client := lobby.NewClient(data.Username, conn)
+	client := lobby.NewClient(req.Username, conn)
 
 	// Grant first user to join lobby owner permission if none predefined.
 	if lobby.Owner() == "" {
-		lobby.SetOwner(data.Username)
+		lobby.SetOwner(req.Username)
 	}
 
-	token, err := lobby.NewToken(cfg, data.Username)
+	token, err := lobby.NewToken(cfg, req.Username)
 	if err != nil {
 		apierrs.WebsocketErrorResponse(conn, err, apierrs.UsernameAlreadyExistsError())
 		return
@@ -212,14 +212,14 @@ func handleRegister(cfg config.Config, lobby *quiz.Lobby, conn *websocket.Conn, 
 	}
 }
 
-func handleLogin(cfg config.Config, lobby *quiz.Lobby, conn *websocket.Conn, reqData any) {
-	data := api.LoginRequestData{}
-	if err := api.DecodeJSON(reqData, &data); err != nil {
+func handleLogin(cfg config.Config, lobby *quiz.Lobby, conn *websocket.Conn, data any) {
+	req, err := api.DecodeJSON[api.LoginRequestData](data)
+	if err != nil {
 		apierrs.WebsocketErrorResponse(conn, err, apierrs.InvalidRequestError("invalid login request"))
 		return
 	}
 
-	claims, err := lobby.CheckToken(cfg, data.Token)
+	claims, err := lobby.CheckToken(cfg, req.Token)
 	if err != nil {
 		apierrs.WebsocketErrorResponse(conn, err, apierrs.InvalidTokenError())
 		return
