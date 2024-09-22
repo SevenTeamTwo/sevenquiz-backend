@@ -65,7 +65,7 @@ func DecodeRoomData(data any) (RoomData, error) {
 
 type CreateLobbyResponse struct {
 	LobbyID string `json:"id"`
-	Token   string `json:"token"`
+	Token   string `json:"token,omitempty"`
 }
 
 func DecodeCreateLobbyResponse(data any) (CreateLobbyResponse, error) {

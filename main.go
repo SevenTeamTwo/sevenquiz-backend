@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"sevenquiz-api/internal/config"
+	"sevenquiz-api/internal/handlers"
 	"sevenquiz-api/internal/middleware"
 	"sevenquiz-api/internal/quiz"
 
@@ -46,8 +47,8 @@ func main() {
 		},
 	}
 
-	createLobbyHandler := quiz.CreateLobbyHandler(cfg, lobbies)
-	lobbyHandler := quiz.LobbyHandler(cfg, lobbies, upgrader)
+	createLobbyHandler := handlers.CreateLobbyHandler(cfg, lobbies)
+	lobbyHandler := handlers.LobbyHandler(cfg, lobbies, upgrader)
 
 	http.Handle("POST /lobby", middleware.ApplyDefaults(createLobbyHandler))
 	http.Handle("GET /lobby/{id}", middleware.ApplyDefaults(lobbyHandler))

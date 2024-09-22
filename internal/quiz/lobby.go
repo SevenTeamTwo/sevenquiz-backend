@@ -7,22 +7,24 @@ import (
 	"sync"
 	"time"
 
+	"sevenquiz-api/api"
 	"sevenquiz-api/internal/config"
 	"sevenquiz-api/internal/websocket"
 
 	"github.com/golang-jwt/jwt"
-	"github.com/lithammer/shortuuid/v3"
 )
 
 type Client struct {
-	// Username is unique and used to define the lobby owner.
-	Username string `json:"username"`
+	username string
+	score    float64
+	alive    bool
+	mu       sync.Mutex
+}
 
-	// Score represents the user's quiz score
-	Score float64 `json:"score"`
-
-	alive bool
-	mu    sync.Mutex
+func (c *Client) Username() string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.username
 }
 
 func (c *Client) Disconnect() {
@@ -43,10 +45,10 @@ func (c *Client) Connect() {
 	c.alive = true
 }
 
-type lobbyState int
+type LobbyState int
 
 const (
-	LobbyStateCreated lobbyState = iota
+	LobbyStateCreated LobbyState = iota
 	LobbyStateRegister
 	LobbyStateQuiz
 	LobbyStateResponses
@@ -54,9 +56,9 @@ const (
 )
 
 type Lobby struct {
-	ID         string
-	Owner      string
-	MaxPlayers int
+	id         string
+	owner      string
+	maxPlayers int
 
 	// tokenValidity invalidates an access token if the "tokenValidity" claim
 	// doesn't match. Since lobby ids are short-sized, it prevents previous
@@ -68,14 +70,43 @@ type Lobby struct {
 	clients map[*websocket.Conn]*Client
 	created time.Time
 	mu      sync.Mutex
-	state   lobbyState
+	state   LobbyState
 }
 
-func (l *Lobby) Init() {
-	l.tokenValidity = shortuuid.New()
-	l.created = time.Now()
-	l.clients = map[*websocket.Conn]*Client{}
-	l.state = LobbyStateCreated
+func (l *Lobby) ID() string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.id
+}
+
+func (l *Lobby) Owner() string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.owner
+}
+
+func (l *Lobby) SetOwner(username string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.owner = username
+}
+
+func (l *Lobby) State() LobbyState {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.state
+}
+
+func (l *Lobby) MaxPlayers() int {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.maxPlayers
+}
+
+func (l *Lobby) IsFull() bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.maxPlayers >= 0 && l.numConns() > l.maxPlayers
 }
 
 func (l *Lobby) NumConns() int {
@@ -116,7 +147,7 @@ func (l *Lobby) getClient(username string) (*websocket.Conn, *Client, bool) {
 		if client == nil {
 			continue
 		}
-		if client.Username == username {
+		if client.username == username {
 			return conn, client, true
 		}
 	}
@@ -132,7 +163,7 @@ func (l *Lobby) GetPlayerList() []string {
 		if client == nil || !client.Alive() {
 			continue
 		}
-		players = append(players, client.Username)
+		players = append(players, client.username)
 	}
 
 	sort.Strings(players)
@@ -140,13 +171,14 @@ func (l *Lobby) GetPlayerList() []string {
 	return players
 }
 
-func (l *Lobby) GetClientFromConn(conn *websocket.Conn) *Client {
+func (l *Lobby) GetClientByConn(conn *websocket.Conn) (*Client, bool) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	return l.clients[conn]
+	c, ok := l.clients[conn]
+	return c, ok
 }
 
-func (l *Lobby) SetState(state lobbyState) {
+func (l *Lobby) SetState(state LobbyState) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.state = state
@@ -158,23 +190,58 @@ func (l *Lobby) SetTokenValidity(tv string) {
 	l.tokenValidity = tv
 }
 
-func (l *Lobby) AssignConn(client *Client, conn *websocket.Conn) {
+// TODO: IsFull() check.
+func (l *Lobby) NewClient(username string, conn *websocket.Conn) *Client {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	l.clients[conn] = client
+
+	cli := &Client{username: username, alive: true}
+	l.clients[conn] = cli
+
+	return cli
 }
 
-// ReplaceConn replaces a conn for the specified client and
-// returns the oldConn with a bool describing if a replace happened.
-func (l *Lobby) ReplaceConn(client *Client, newConn *websocket.Conn) (oldConn *websocket.Conn, replaced bool) {
-	if client == nil {
-		return nil, false
-	}
+func (l *Lobby) NewUnregisteredClient(conn *websocket.Conn) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.clients[conn] = nil
+}
 
+func (l *Lobby) Broadcast(v any) error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
-	oldConn, _, replaced = l.getClient(client.Username)
+	errs := []error{}
+	for conn := range l.clients {
+		if conn == nil {
+			continue
+		}
+		if err := conn.WriteJSON(v); err != nil {
+			errs = append(errs, err)
+		}
+	}
+
+	return errors.Join(errs...)
+}
+
+func (l *Lobby) BroadcastLobbyUpdate(username, action string) error {
+	res := api.Response{
+		Type: api.ResponseTypeLobbyUpdate,
+		Data: api.LobbyUpdateResponseData{
+			Username: username,
+			Action:   action,
+		},
+	}
+	return l.Broadcast(res)
+}
+
+// ReplaceClientConn replaces a conn for the specified client and
+// returns the oldConn with a bool describing if a replace happened.
+func (l *Lobby) ReplaceClientConn(username string, newConn *websocket.Conn) (oldConn *websocket.Conn, replaced bool) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	oldConn, client, replaced := l.getClient(username)
 	if !replaced {
 		return nil, replaced
 	}
@@ -184,6 +251,8 @@ func (l *Lobby) ReplaceConn(client *Client, newConn *websocket.Conn) (oldConn *w
 
 	l.deleteConn(oldConn)
 	l.clients[newConn] = client
+
+	client.Connect()
 
 	return oldConn, replaced
 }
@@ -203,7 +272,7 @@ func (l *Lobby) deleteConn(conn *websocket.Conn) {
 
 func (l *Lobby) NewToken(cfg config.Config, username string) (string, error) {
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
-		"lobbyId":       l.ID,
+		"lobbyId":       l.id,
 		"tokenValidity": l.tokenValidity,
 		"username":      username,
 	})
@@ -244,7 +313,7 @@ func (l *Lobby) CheckToken(cfg config.Config, token string) (jwt.MapClaims, erro
 	if !ok {
 		return nil, errors.New("token has no lobbyId claim")
 	}
-	if lobbyID != l.ID {
+	if lobbyID != l.id {
 		return nil, errors.New("token does not match lobby id")
 	}
 
