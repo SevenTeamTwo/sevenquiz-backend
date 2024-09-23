@@ -21,7 +21,7 @@ type LobbyOptions struct {
 	// Owner represents the lobby's owner.
 	// This priviledged user has the rights to start a lobby
 	// and credit points at the end of the quiz.
-	// Empty value will grant the first user to login owner privileges.
+	// Empty value will grant the first user to register owner privileges.
 	Owner string
 
 	// MaxPlayers defines the maximum amount of players
@@ -46,6 +46,7 @@ func (l *Lobbies) Register(opts LobbyOptions) (*Lobby, error) {
 		clients:       map[*websocket.Conn]*Client{},
 		created:       time.Now(),
 		state:         LobbyStateCreated,
+		doneCh:        make(chan struct{}),
 	}
 
 	l.mu.Lock()
@@ -90,9 +91,8 @@ func (l *Lobbies) Delete(id string) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
-	lobby := l.lobbies[id]
-	if lobby != nil {
-		defer lobby.CloseConns()
+	if lobby := l.lobbies[id]; lobby != nil {
+		lobby.Close()
 	}
 
 	delete(l.lobbies, id)

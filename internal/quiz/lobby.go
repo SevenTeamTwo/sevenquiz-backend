@@ -71,6 +71,24 @@ type Lobby struct {
 	created time.Time
 	mu      sync.Mutex
 	state   LobbyState
+	doneCh  chan struct{}
+}
+
+func (l *Lobby) Close() {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	for c := range l.clients {
+		if c != nil {
+			c.Close()
+		}
+	}
+
+	close(l.doneCh)
+}
+
+func (l *Lobby) Done() <-chan struct{} {
+	return l.doneCh
 }
 
 func (l *Lobby) ID() string {
@@ -106,7 +124,7 @@ func (l *Lobby) MaxPlayers() int {
 func (l *Lobby) IsFull() bool {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	return l.maxPlayers >= 0 && l.numConns() > l.maxPlayers
+	return l.maxPlayers >= 0 && l.numConns() >= l.maxPlayers
 }
 
 func (l *Lobby) NumConns() int {
@@ -120,20 +138,6 @@ func (l *Lobby) numConns() int {
 		return len(l.clients) - 1
 	}
 	return len(l.clients)
-}
-
-func (l *Lobby) CloseConns() {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	l.closeConns()
-}
-
-func (l *Lobby) closeConns() {
-	for c := range l.clients {
-		if c != nil {
-			c.Close()
-		}
-	}
 }
 
 func (l *Lobby) GetClient(username string) (*websocket.Conn, *Client, bool) {
@@ -190,8 +194,7 @@ func (l *Lobby) SetTokenValidity(tv string) {
 	l.tokenValidity = tv
 }
 
-// TODO: IsFull() check.
-func (l *Lobby) NewClient(username string, conn *websocket.Conn) *Client {
+func (l *Lobby) AddClientWithConn(conn *websocket.Conn, username string) *Client {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
@@ -201,7 +204,7 @@ func (l *Lobby) NewClient(username string, conn *websocket.Conn) *Client {
 	return cli
 }
 
-func (l *Lobby) NewUnregisteredClient(conn *websocket.Conn) {
+func (l *Lobby) AddConn(conn *websocket.Conn) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.clients[conn] = nil
@@ -224,10 +227,10 @@ func (l *Lobby) Broadcast(v any) error {
 	return errors.Join(errs...)
 }
 
-func (l *Lobby) BroadcastLobbyUpdate(username, action string) error {
+func (l *Lobby) BroadcastPlayerUpdate(username, action string) error {
 	res := api.Response{
-		Type: api.ResponseTypeLobbyUpdate,
-		Data: api.LobbyUpdateResponseData{
+		Type: api.ResponseTypePlayerUpdate,
+		Data: api.PlayerUpdateResponseData{
 			Username: username,
 			Action:   action,
 		},
@@ -257,7 +260,7 @@ func (l *Lobby) ReplaceClientConn(username string, newConn *websocket.Conn) (old
 	return oldConn, replaced
 }
 
-func (l *Lobby) DeleteConn(conn *websocket.Conn) {
+func (l *Lobby) DeleteClientByConn(conn *websocket.Conn) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.deleteConn(conn)

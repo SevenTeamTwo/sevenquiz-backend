@@ -3,11 +3,10 @@ package api
 import "encoding/json"
 
 const (
-	ResponseTypeError       = "error"
-	ResponseTypeLogin       = "login"
-	ResponseTypeRegister    = "register"
-	ResponseTypeRoom        = "room"
-	ResponseTypeLobbyUpdate = "lobbyUpdate"
+	ResponseTypeError        = "error"
+	ResponseTypeRegister     = "register"
+	ResponseTypeLobby        = "lobby"
+	ResponseTypePlayerUpdate = "playerUpdate"
 )
 
 type Response struct {
@@ -18,9 +17,8 @@ type Response struct {
 
 const (
 	RequestTypeError    = "error"
-	RequestTypeLogin    = "login"
 	RequestTypeRegister = "register"
-	RequestTypeRoom     = "room"
+	RequestTypeLobby    = "lobby"
 )
 
 type Request struct {
@@ -34,7 +32,7 @@ type ErrorData struct {
 	Extra   any    `json:"extra,omitempty"`
 }
 
-type RoomData struct {
+type LobbyData struct {
 	ID         string   `json:"id"`
 	Owner      string   `json:"owner"`
 	MaxPlayers int      `json:"maxPlayers"`
@@ -43,22 +41,13 @@ type RoomData struct {
 
 type CreateLobbyResponse struct {
 	LobbyID string `json:"id"`
-	Token   string `json:"token,omitempty"`
 }
 
 type RegisterRequestData struct {
 	Username string `json:"username"`
 }
 
-type RegisterResponseData struct {
-	Token string `json:"token"`
-}
-
-type LoginRequestData struct {
-	Token string `json:"token"`
-}
-
-type LobbyUpdateResponseData struct {
+type PlayerUpdateResponseData struct {
 	Username string `json:"username,omitempty"`
 	Action   string `json:"action"`
 }

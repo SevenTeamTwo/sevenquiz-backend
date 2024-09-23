@@ -31,9 +31,9 @@ func (c *Client) ReadResponse() (api.Response, error) {
 	return res, err
 }
 
-func (c *Client) Room() (api.Response, error) {
+func (c *Client) Lobby() (api.Response, error) {
 	req := api.Request{
-		Type: api.RequestTypeRoom,
+		Type: api.RequestTypeLobby,
 	}
 	return c.sendCmd(req)
 }
@@ -43,16 +43,6 @@ func (c *Client) Register(username string) (api.Response, error) {
 		Type: api.RequestTypeRegister,
 		Data: api.RegisterRequestData{
 			Username: username,
-		},
-	}
-	return c.sendCmd(req)
-}
-
-func (c *Client) Login(token string) (api.Response, error) {
-	req := api.Request{
-		Type: api.RequestTypeLogin,
-		Data: api.LoginRequestData{
-			Token: token,
 		},
 	}
 	return c.sendCmd(req)
