@@ -53,8 +53,7 @@ type PlayerUpdateResponseData struct {
 	Action   string `json:"action"`
 }
 
-func DecodeJSON[T any](data any) (T, error) { //nolint: ireturn
-	var res T
+func DecodeJSON[T any](data any) (res T, err error) {
 	b, err := json.Marshal(data)
 	if err != nil {
 		return res, err

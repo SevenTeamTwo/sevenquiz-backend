@@ -192,7 +192,7 @@ func handleLobbyRequest(lobby *quiz.Lobby, conn *websocket.Conn) {
 	}
 }
 
-func handleRegisterRequest(cfg config.Config, lobby *quiz.Lobby, conn *websocket.Conn, data any) {
+func handleRegisterRequest(_ config.Config, lobby *quiz.Lobby, conn *websocket.Conn, data any) {
 	req, err := api.DecodeJSON[api.RegisterRequestData](data)
 	if err != nil {
 		apierrs.WebsocketErrorResponse(conn, err, apierrs.InvalidRequestError("invalid register request"))
