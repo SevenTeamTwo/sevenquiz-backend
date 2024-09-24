@@ -7,10 +7,10 @@ import (
 	"os"
 	"time"
 
-	"sevenquiz-api/internal/config"
-	"sevenquiz-api/internal/handlers"
-	"sevenquiz-api/internal/middleware"
-	"sevenquiz-api/internal/quiz"
+	"sevenquiz-backend/internal/config"
+	"sevenquiz-backend/internal/handlers"
+	"sevenquiz-backend/internal/middleware"
+	"sevenquiz-backend/internal/quiz"
 
 	"github.com/MadAppGang/httplog"
 	"github.com/gorilla/websocket"

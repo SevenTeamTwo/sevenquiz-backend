@@ -4,9 +4,9 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
-	"sevenquiz-api/api"
+	"sevenquiz-backend/api"
 
-	"sevenquiz-api/internal/websocket"
+	"sevenquiz-backend/internal/websocket"
 )
 
 const (

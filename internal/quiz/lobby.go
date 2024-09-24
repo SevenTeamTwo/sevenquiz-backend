@@ -7,9 +7,9 @@ import (
 	"sync"
 	"time"
 
-	"sevenquiz-api/api"
-	"sevenquiz-api/internal/config"
-	"sevenquiz-api/internal/websocket"
+	"sevenquiz-backend/api"
+	"sevenquiz-backend/internal/config"
+	"sevenquiz-backend/internal/websocket"
 
 	"github.com/golang-jwt/jwt"
 )

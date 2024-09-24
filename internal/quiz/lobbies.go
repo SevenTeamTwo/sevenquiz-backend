@@ -2,7 +2,7 @@ package quiz
 
 import (
 	"errors"
-	"sevenquiz-api/internal/websocket"
+	"sevenquiz-backend/internal/websocket"
 	"sync"
 	"time"
 

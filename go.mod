@@ -1,4 +1,4 @@
-module sevenquiz-api
+module sevenquiz-backend
 
 go 1.23.1
 

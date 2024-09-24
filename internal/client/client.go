@@ -1,7 +1,7 @@
 package client
 
 import (
-	"sevenquiz-api/api"
+	"sevenquiz-backend/api"
 
 	"github.com/gorilla/websocket"
 )
