@@ -10,6 +10,9 @@ import (
 	"github.com/gorilla/websocket"
 )
 
+// The Conn type represents a WebSocket connection.
+//
+// Multiple goroutines may invoke methods on a Conn simultaneously.
 type Conn struct {
 	c *websocket.Conn
 

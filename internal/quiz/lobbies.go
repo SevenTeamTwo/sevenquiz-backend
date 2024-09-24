@@ -43,7 +43,7 @@ func (l *Lobbies) Register(opts LobbyOptions) (*Lobby, error) {
 		owner:         opts.Owner,
 		maxPlayers:    opts.MaxPlayers,
 		tokenValidity: shortuuid.New(),
-		clients:       map[*websocket.Conn]*Client{},
+		players:       map[*websocket.Conn]*LobbyPlayer{},
 		created:       time.Now(),
 		state:         LobbyStateCreated,
 		doneCh:        make(chan struct{}),

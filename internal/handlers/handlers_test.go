@@ -147,7 +147,7 @@ func TestLobbyRegister(t *testing.T) {
 	assertLobbyUpdate(t, cli, registerUsername, "join")
 	assertLobbyUpdate(t, cli, registerUsername, "new owner")
 
-	_, quizCli, ok := lobby.GetClient(registerUsername)
+	_, quizCli, ok := lobby.GetPlayer(registerUsername)
 	assertEqual(t, true, ok)
 	assertNotNil(t, quizCli)
 	assertEqual(t, registerUsername, quizCli.Username())

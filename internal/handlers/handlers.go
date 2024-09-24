@@ -117,10 +117,10 @@ func handleDisconnect(lobbies *quiz.Lobbies, lobby *quiz.Lobby, conn *websocket.
 	*/
 	case quiz.LobbyStateCreated, quiz.LobbyStateRegister:
 		// Capture client before deletion.
-		cli, ok := lobby.GetClientByConn(conn)
+		cli, ok := lobby.GetPlayerByConn(conn)
 
 		// Makes sure a player slot is freed and removed from list.
-		lobby.DeleteClientByConn(conn)
+		lobby.DeletePlayerByConn(conn)
 
 		if !ok || cli == nil {
 			// Conn did not register, free a player slot.
@@ -200,7 +200,7 @@ func handleRegisterRequest(_ config.Config, lobby *quiz.Lobby, conn *websocket.C
 	}
 
 	// cancel register if user already logged in.
-	if client, ok := lobby.GetClientByConn(conn); ok && client != nil {
+	if client, ok := lobby.GetPlayerByConn(conn); ok && client != nil {
 		apierrs.WebsocketErrorResponse(conn, nil, apierrs.UserAlreadyRegisteredError())
 		return
 	}
@@ -210,12 +210,12 @@ func handleRegisterRequest(_ config.Config, lobby *quiz.Lobby, conn *websocket.C
 		return
 	}
 
-	if _, _, exist := lobby.GetClient(req.Username); exist {
+	if _, _, exist := lobby.GetPlayer(req.Username); exist {
 		apierrs.WebsocketErrorResponse(conn, nil, apierrs.UsernameAlreadyExistsError())
 		return
 	}
 
-	client := lobby.AddClientWithConn(conn, req.Username)
+	client := lobby.AddPlayerWithConn(conn, req.Username)
 
 	res := api.Response{
 		Type: api.ResponseTypeRegister,
