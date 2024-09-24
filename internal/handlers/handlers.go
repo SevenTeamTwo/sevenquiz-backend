@@ -56,7 +56,7 @@ func LobbyToAPIResponse(lobby *quiz.Lobby) api.LobbyData {
 		ID:         lobby.ID(),
 		MaxPlayers: lobby.MaxPlayers(),
 		PlayerList: lobby.GetPlayerList(),
-		Created:    lobby.CreationDate().Format(time.RFC1123),
+		Created:    lobby.CreationDate().Format(time.RFC3339),
 	}
 	if owner := lobby.Owner(); owner != "" {
 		data.Owner = &owner
