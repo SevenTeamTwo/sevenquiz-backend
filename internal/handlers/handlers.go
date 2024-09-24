@@ -52,13 +52,16 @@ func CreateLobbyHandler(cfg config.Config, lobbies *quiz.Lobbies) http.HandlerFu
 
 // LobbyToAPIResponse converts a lobby to an API representation.
 func LobbyToAPIResponse(lobby *quiz.Lobby) api.LobbyData {
-	return api.LobbyData{
+	data := api.LobbyData{
 		ID:         lobby.ID(),
-		Owner:      lobby.Owner(),
 		MaxPlayers: lobby.MaxPlayers(),
 		PlayerList: lobby.GetPlayerList(),
 		Created:    lobby.CreationDate().Format(time.RFC1123),
 	}
+	if owner := lobby.Owner(); owner != "" {
+		data.Owner = &owner
+	}
+	return data
 }
 
 // LobbyHandler returns a new lobby handler and will run a complete

@@ -34,7 +34,7 @@ type ErrorData struct {
 
 type LobbyData struct {
 	ID         string   `json:"id"`
-	Owner      string   `json:"owner"`
+	Owner      *string  `json:"owner"`
 	MaxPlayers int      `json:"maxPlayers"`
 	PlayerList []string `json:"playerList"`
 	Created    string   `json:"created"`

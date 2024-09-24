@@ -208,7 +208,7 @@ func TestLobbyPlayerList(t *testing.T) {
 	assertLobbyUpdate(t, cli, ownerUsername, "join")
 
 	wantLobby := defaultTestWantLobby
-	wantLobby.Owner = ownerUsername
+	wantLobby.Owner = &ownerUsername
 	wantLobby.PlayerList = append(wantLobby.PlayerList, ownerUsername)
 
 	registerUsers := map[string]*client.Client{
@@ -317,7 +317,7 @@ func TestLobbyOwnerElection(t *testing.T) {
 	assertLobbyBanner(t, cli, defaultTestWantLobby)
 	assertRegister(t, cli, ownerUsername)
 	assertLobbyUpdate(t, cli, ownerUsername, "join")
-	wantLobby.Owner = ownerUsername
+	wantLobby.Owner = &ownerUsername
 	wantLobby.PlayerList = append(wantLobby.PlayerList, ownerUsername)
 
 	// Setup second player to join
@@ -350,7 +350,12 @@ func assertLobby(t *testing.T, cli *client.Client, wantLobby api.LobbyData) {
 	lobbyData, err := api.DecodeJSON[api.LobbyData](res.Data)
 	assertNil(t, err)
 
-	assertEqual(t, wantLobby.Owner, lobbyData.Owner)
+	if wantLobby.Owner == nil {
+		assertNil(t, lobbyData.Owner)
+	} else {
+		assertNotNil(t, lobbyData.Owner)
+		assertEqual(t, *wantLobby.Owner, *lobbyData.Owner)
+	}
 	assertEqual(t, wantLobby.MaxPlayers, lobbyData.MaxPlayers)
 	assertEqual(t, true, len(lobbyData.ID) == 5)
 	assertEqual(t, true, len(lobbyData.Created) > 0)
@@ -366,7 +371,12 @@ func assertLobbyBanner(t *testing.T, cli *client.Client, wantLobby api.LobbyData
 	lobbyData, err := api.DecodeJSON[api.LobbyData](lobbyRes.Data)
 	assertNil(t, err)
 
-	assertEqual(t, wantLobby.Owner, lobbyData.Owner)
+	if wantLobby.Owner == nil {
+		assertNil(t, lobbyData.Owner)
+	} else {
+		assertNotNil(t, lobbyData.Owner)
+		assertEqual(t, *wantLobby.Owner, *lobbyData.Owner)
+	}
 	assertEqual(t, wantLobby.MaxPlayers, lobbyData.MaxPlayers)
 	assertEqual(t, true, len(lobbyData.ID) == 5)
 	assertEqual(t, true, len(lobbyData.Created) > 0)
