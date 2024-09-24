@@ -37,6 +37,7 @@ type LobbyData struct {
 	Owner      string   `json:"owner"`
 	MaxPlayers int      `json:"maxPlayers"`
 	PlayerList []string `json:"playerList"`
+	Created    string   `json:"created"`
 }
 
 type CreateLobbyResponse struct {

@@ -353,6 +353,7 @@ func assertLobby(t *testing.T, cli *client.Client, wantLobby api.LobbyData) {
 	assertEqual(t, wantLobby.Owner, lobbyData.Owner)
 	assertEqual(t, wantLobby.MaxPlayers, lobbyData.MaxPlayers)
 	assertEqual(t, true, len(lobbyData.ID) == 5)
+	assertEqual(t, true, len(lobbyData.Created) > 0)
 }
 
 func assertLobbyBanner(t *testing.T, cli *client.Client, wantLobby api.LobbyData) {
@@ -368,6 +369,7 @@ func assertLobbyBanner(t *testing.T, cli *client.Client, wantLobby api.LobbyData
 	assertEqual(t, wantLobby.Owner, lobbyData.Owner)
 	assertEqual(t, wantLobby.MaxPlayers, lobbyData.MaxPlayers)
 	assertEqual(t, true, len(lobbyData.ID) == 5)
+	assertEqual(t, true, len(lobbyData.Created) > 0)
 }
 
 func assertRegister(t *testing.T, cli *client.Client, username string) {

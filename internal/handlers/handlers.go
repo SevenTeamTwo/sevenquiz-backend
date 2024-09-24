@@ -57,6 +57,7 @@ func LobbyToAPIResponse(lobby *quiz.Lobby) api.LobbyData {
 		Owner:      lobby.Owner(),
 		MaxPlayers: lobby.MaxPlayers(),
 		PlayerList: lobby.GetPlayerList(),
+		Created:    lobby.CreationDate().Format(time.RFC1123),
 	}
 }
 
@@ -224,7 +225,6 @@ func handleRegisterRequest(cfg config.Config, lobby *quiz.Lobby, conn *websocket
 	if err := conn.WriteJSON(res); err != nil {
 		log.Println(err)
 	}
-
 	if err := lobby.BroadcastPlayerUpdate(client.Username(), "join"); err != nil {
 		log.Println(err)
 	}

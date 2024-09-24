@@ -115,6 +115,12 @@ func (l *Lobby) State() LobbyState {
 	return l.state
 }
 
+func (l *Lobby) CreationDate() time.Time {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.created
+}
+
 func (l *Lobby) MaxPlayers() int {
 	l.mu.Lock()
 	defer l.mu.Unlock()
