@@ -217,11 +217,6 @@ func handleRegisterRequest(cfg config.Config, lobby *quiz.Lobby, conn *websocket
 
 	client := lobby.AddClientWithConn(conn, req.Username)
 
-	// Grant first user to join lobby owner permission.
-	if lobby.Owner() == "" {
-		lobby.SetOwner(req.Username)
-	}
-
 	res := api.Response{
 		Type: api.ResponseTypeRegister,
 	}
@@ -230,6 +225,14 @@ func handleRegisterRequest(cfg config.Config, lobby *quiz.Lobby, conn *websocket
 	}
 	if err := lobby.BroadcastPlayerUpdate(client.Username(), "join"); err != nil {
 		log.Println(err)
+	}
+
+	// Grant first user to join lobby owner permission.
+	if lobby.Owner() == "" {
+		lobby.SetOwner(req.Username)
+		if err := lobby.BroadcastPlayerUpdate(req.Username, "new owner"); err != nil {
+			log.Println(err)
+		}
 	}
 }
 

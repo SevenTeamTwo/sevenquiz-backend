@@ -145,6 +145,7 @@ func TestLobbyRegister(t *testing.T) {
 	assertLobbyBanner(t, cli, defaultTestWantLobby)
 	assertRegister(t, cli, registerUsername)
 	assertLobbyUpdate(t, cli, registerUsername, "join")
+	assertLobbyUpdate(t, cli, registerUsername, "new owner")
 
 	_, quizCli, ok := lobby.GetClient(registerUsername)
 	assertEqual(t, true, ok)
@@ -206,6 +207,7 @@ func TestLobbyPlayerList(t *testing.T) {
 	assertLobbyBanner(t, cli, defaultTestWantLobby)
 	assertRegister(t, cli, ownerUsername)
 	assertLobbyUpdate(t, cli, ownerUsername, "join")
+	assertLobbyUpdate(t, cli, ownerUsername, "new owner")
 
 	wantLobby := defaultTestWantLobby
 	wantLobby.Owner = &ownerUsername
