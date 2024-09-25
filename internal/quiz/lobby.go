@@ -3,7 +3,10 @@ package quiz
 import (
 	"errors"
 	"fmt"
+	"io/fs"
+	"slices"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -29,9 +32,11 @@ const (
 //
 // Multiple goroutines may invoke methods on a Lobby simultaneously.
 type Lobby struct {
-	id         string
-	owner      string
-	maxPlayers int
+	id           string
+	owner        string
+	maxPlayers   int
+	quizzes      fs.FS
+	selectedQuiz string
 
 	// tokenValidity invalidates an access token if the "tokenValidity" claim
 	// doesn't match. Since lobby ids are short-sized, it prevents previous
@@ -108,6 +113,55 @@ func (l *Lobby) CreationDate() time.Time {
 // MaxPlayers returns the maximum allowed players in a lobby.
 func (l *Lobby) MaxPlayers() int {
 	return l.maxPlayers
+}
+
+func (l *Lobby) Quiz() string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.selectedQuiz
+}
+
+func (l *Lobby) SetQuiz(quiz string) error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	quizzes, err := l.listQuizzes()
+	if err != nil {
+		return err
+	}
+	if !slices.Contains(quizzes, quiz) {
+		return errors.New("quiz does not exists")
+	}
+
+	l.selectedQuiz = quiz
+
+	return nil
+}
+
+func (l *Lobby) ListQuizzes() ([]string, error) {
+	return l.listQuizzes()
+}
+
+func (l *Lobby) listQuizzes() ([]string, error) {
+	var quizzes []string
+
+	root := "."
+	depth := 0
+
+	err := fs.WalkDir(l.quizzes, root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if path == root {
+			return nil
+		}
+		if d.IsDir() && strings.Count(path, "/") <= depth {
+			quizzes = append(quizzes, d.Name())
+		}
+		return nil
+	})
+
+	return quizzes, err
 }
 
 // IsFull checks the total number of registered websockets in a

@@ -3,6 +3,7 @@ package handlers
 import (
 	"encoding/json"
 	"errors"
+	"io/fs"
 	"log"
 	"net/http"
 	"sevenquiz-backend/api"
@@ -18,10 +19,11 @@ import (
 
 // CreateLobbyHandler returns a handler capable of creating new lobbies
 // and storing them in the lobbies container.
-func CreateLobbyHandler(cfg config.Config, lobbies *quiz.Lobbies) http.HandlerFunc {
+func CreateLobbyHandler(cfg config.Config, lobbies *quiz.Lobbies, quizzes fs.FS) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		lobby, err := lobbies.Register(quiz.LobbyOptions{
 			MaxPlayers: cfg.Lobby.MaxPlayers,
+			Quizzes:    quizzes,
 		})
 		if err != nil {
 			apierrs.HTTPErrorResponse(w, http.StatusInternalServerError, err, apierrs.InternalServerError())
@@ -51,17 +53,23 @@ func CreateLobbyHandler(cfg config.Config, lobbies *quiz.Lobbies) http.HandlerFu
 }
 
 // LobbyToAPIResponse converts a lobby to an API representation.
-func LobbyToAPIResponse(lobby *quiz.Lobby) api.LobbyData {
+func LobbyToAPIResponse(lobby *quiz.Lobby) (api.LobbyData, error) {
+	quizzes, err := lobby.ListQuizzes()
+	if err != nil {
+		return api.LobbyData{}, err
+	}
 	data := api.LobbyData{
-		ID:         lobby.ID(),
-		MaxPlayers: lobby.MaxPlayers(),
-		PlayerList: lobby.GetPlayerList(),
-		Created:    lobby.CreationDate().Format(time.RFC3339),
+		ID:          lobby.ID(),
+		MaxPlayers:  lobby.MaxPlayers(),
+		PlayerList:  lobby.GetPlayerList(),
+		Created:     lobby.CreationDate().Format(time.RFC3339),
+		Quizzes:     quizzes,
+		CurrentQuiz: lobby.Quiz(),
 	}
 	if owner := lobby.Owner(); owner != "" {
 		data.Owner = &owner
 	}
-	return data
+	return data, nil
 }
 
 // LobbyHandler returns a new lobby handler and will run a complete
@@ -102,7 +110,7 @@ func LobbyHandler(cfg config.Config, lobbies *quiz.Lobbies, upgrader gws.Upgrade
 
 		switch lobby.State() {
 		case quiz.LobbyStateCreated, quiz.LobbyStateRegister:
-			handleRegister(cfg, lobby, wsConn)
+			handleRegister(lobby, wsConn)
 		}
 	}
 }
@@ -160,7 +168,7 @@ func handleDisconnect(lobbies *quiz.Lobbies, lobby *quiz.Lobby, conn *websocket.
 	}
 }
 
-func handleRegister(cfg config.Config, lobby *quiz.Lobby, conn *websocket.Conn) {
+func handleRegister(lobby *quiz.Lobby, conn *websocket.Conn) {
 	lobby.AddConn(conn)
 
 	// Send banner on websocket upgrade with lobby details.
@@ -177,9 +185,11 @@ func handleRegister(cfg config.Config, lobby *quiz.Lobby, conn *websocket.Conn) 
 		case api.RequestTypeLobby:
 			handleLobbyRequest(lobby, conn)
 		case api.RequestTypeRegister:
-			handleRegisterRequest(cfg, lobby, conn, req.Data)
+			handleRegisterRequest(lobby, conn, req.Data)
 		case api.RequestTypeKick:
-			handleKickRequest(cfg, lobby, conn, req.Data)
+			handleKickRequest(lobby, conn, req.Data)
+		case api.RequestTypeConfigure:
+			handleConfigureRequest(lobby, conn, req.Data)
 		default:
 			apierrs.WebsocketErrorResponse(conn, nil, apierrs.InvalidRequestError("unknown request type"))
 			continue
@@ -188,16 +198,21 @@ func handleRegister(cfg config.Config, lobby *quiz.Lobby, conn *websocket.Conn) 
 }
 
 func handleLobbyRequest(lobby *quiz.Lobby, conn *websocket.Conn) {
+	data, err := LobbyToAPIResponse(lobby)
+	if err != nil {
+		apierrs.WebsocketErrorResponse(conn, err, apierrs.InternalServerError())
+		return
+	}
 	res := api.Response{
 		Type: api.ResponseTypeLobby,
-		Data: LobbyToAPIResponse(lobby),
+		Data: data,
 	}
 	if err := conn.WriteJSON(res); err != nil {
 		log.Println(err)
 	}
 }
 
-func handleRegisterRequest(_ config.Config, lobby *quiz.Lobby, conn *websocket.Conn, data any) {
+func handleRegisterRequest(lobby *quiz.Lobby, conn *websocket.Conn, data any) {
 	req, err := api.DecodeJSON[api.RegisterRequestData](data)
 	if err != nil {
 		apierrs.WebsocketErrorResponse(conn, err, apierrs.InvalidRequestError("invalid register request"))
@@ -241,7 +256,7 @@ func handleRegisterRequest(_ config.Config, lobby *quiz.Lobby, conn *websocket.C
 	}
 }
 
-func handleKickRequest(_ config.Config, lobby *quiz.Lobby, conn *websocket.Conn, data any) {
+func handleKickRequest(lobby *quiz.Lobby, conn *websocket.Conn, data any) {
 	req, err := api.DecodeJSON[api.KickRequestData](data)
 	if err != nil {
 		apierrs.WebsocketErrorResponse(conn, err, apierrs.InvalidRequestError("invalid kick request"))
@@ -266,6 +281,33 @@ func handleKickRequest(_ config.Config, lobby *quiz.Lobby, conn *websocket.Conn,
 		log.Println(err)
 	}
 	if err := lobby.BroadcastPlayerUpdate(req.Username, "kick"); err != nil {
+		log.Println(err)
+	}
+}
+
+func handleConfigureRequest(lobby *quiz.Lobby, conn *websocket.Conn, data any) {
+	req, err := api.DecodeJSON[api.LobbyConfigureData](data)
+	if err != nil {
+		apierrs.WebsocketErrorResponse(conn, err, apierrs.InvalidRequestError("invalid configure request"))
+		return
+	}
+	client, ok := lobby.GetPlayerByConn(conn)
+	if !ok || client == nil {
+		apierrs.WebsocketErrorResponse(conn, nil, apierrs.InvalidRequestError("user is not lobby owner"))
+		return
+	}
+	if client.Username() != lobby.Owner() {
+		apierrs.WebsocketErrorResponse(conn, nil, apierrs.InvalidRequestError("user is not lobby owner"))
+		return
+	}
+	if err := lobby.SetQuiz(req.Quiz); err != nil {
+		apierrs.WebsocketErrorResponse(conn, nil, apierrs.InvalidRequestError("invalid quiz selected"))
+		return
+	}
+	res := api.Response{
+		Type: api.ResponseTypeConfigure,
+	}
+	if err := conn.WriteJSON(res); err != nil {
 		log.Println(err)
 	}
 }

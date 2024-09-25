@@ -2,6 +2,7 @@ package quiz
 
 import (
 	"errors"
+	"io/fs"
 	"sevenquiz-backend/internal/websocket"
 	"sync"
 	"time"
@@ -29,6 +30,10 @@ type LobbyOptions struct {
 	// with a lobby filled with unregistered users.
 	// Default is set to 25. Negative value means no limit.
 	MaxPlayers int
+
+	// Quizzes registers an embed filesystem holding all quizzes
+	// questions and assets.
+	Quizzes fs.FS
 }
 
 // Register tries to register a new lobby and returns an error
@@ -42,12 +47,23 @@ func (l *Lobbies) Register(opts LobbyOptions) (*Lobby, error) {
 		id:            newLobbyID(),
 		owner:         opts.Owner,
 		maxPlayers:    opts.MaxPlayers,
+		quizzes:       opts.Quizzes,
 		tokenValidity: shortuuid.New(),
 		players:       map[*websocket.Conn]*LobbyPlayer{},
 		created:       time.Now(),
 		state:         LobbyStateCreated,
 		doneCh:        make(chan struct{}),
 	}
+
+	quizzes, err := lobby.listQuizzes()
+	if err != nil {
+		return nil, err
+	}
+	if len(quizzes) == 0 {
+		return nil, errors.New("lobby has no quizzes")
+	}
+
+	lobby.selectedQuiz = quizzes[0]
 
 	l.mu.Lock()
 	defer l.mu.Unlock()

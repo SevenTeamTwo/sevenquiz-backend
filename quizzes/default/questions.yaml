@@ -1,0 +1,36 @@
+question:
+  type: simple
+  value: "What is the France's capital ?"
+answer:
+  type: textbox
+  response: ["Paris"]
+---
+question:
+  type: simple
+  value: "Who is this character ?"
+  image: quizzes/default/assets/yuumi.jpg
+answer:
+  type: multivalues
+  options: 
+    a: Yasuo
+    b: Master Yi
+    c: Yuumo
+    d: Teemo
+  response: ["Yuumi"]
+---
+question:
+  type: simple
+  value: "Who makes this sound ?"
+  audio: quizzes/default/assets/meow.mp3
+answer:
+  type: textbox
+  response: ["Cat"]
+---
+question:
+  type: simple
+  value: "Where is waldo ?"
+  image: quizzes/default/assets/waldo.jpg
+answer:
+  type: image_click
+  image: quizzes/default/assets/waldo_answer.jpg
+  response: ["180.4", "34.5"]

@@ -8,6 +8,7 @@ const (
 	ResponseTypeLobby        = "lobby"
 	ResponseTypeKick         = "kick"
 	ResponseTypePlayerUpdate = "playerUpdate"
+	ResponseTypeConfigure    = "configure"
 )
 
 type Response struct {
@@ -17,10 +18,11 @@ type Response struct {
 }
 
 const (
-	RequestTypeError    = "error"
-	RequestTypeRegister = "register"
-	RequestTypeLobby    = "lobby"
-	RequestTypeKick     = "kick"
+	RequestTypeError     = "error"
+	RequestTypeRegister  = "register"
+	RequestTypeLobby     = "lobby"
+	RequestTypeKick      = "kick"
+	RequestTypeConfigure = "configure"
 )
 
 type Request struct {
@@ -35,11 +37,17 @@ type ErrorData struct {
 }
 
 type LobbyData struct {
-	ID         string   `json:"id"`
-	Owner      *string  `json:"owner"`
-	MaxPlayers int      `json:"maxPlayers"`
-	PlayerList []string `json:"playerList"`
-	Created    string   `json:"created"`
+	ID          string   `json:"id"`
+	Owner       *string  `json:"owner"`
+	MaxPlayers  int      `json:"maxPlayers"`
+	PlayerList  []string `json:"playerList"`
+	Quizzes     []string `json:"quizzes"`
+	CurrentQuiz string   `json:"currentQuiz"`
+	Created     string   `json:"created"`
+}
+
+type LobbyConfigureData struct {
+	Quiz string `json:"quiz"`
 }
 
 type CreateLobbyResponse struct {

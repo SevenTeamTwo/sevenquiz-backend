@@ -1,8 +1,10 @@
 package handlers_test
 
 import (
+	"embed"
 	"encoding/json"
 	"io"
+	"io/fs"
 	"log"
 	"net/http"
 	"net/http/httptest"
@@ -23,8 +25,20 @@ import (
 	"github.com/gorilla/websocket"
 )
 
+var (
+	//go:embed tests/quizzes
+	quizzes   embed.FS
+	quizzesFS fs.FS
+)
+
 func init() {
 	log.SetOutput(io.Discard)
+
+	var err error
+	if quizzesFS, err = fs.Sub(quizzes, "tests/quizzes"); err != nil {
+		log.Fatal(err)
+	}
+	defaultTestLobbyOptions.Quizzes = quizzesFS
 }
 
 var (
@@ -42,10 +56,13 @@ var (
 		},
 	}
 	defaultTestWantLobby = api.LobbyData{
-		MaxPlayers: 20,
+		MaxPlayers:  20,
+		Quizzes:     []string{"cars", "custom", "default"},
+		CurrentQuiz: "cars",
 	}
 	defaultTestLobbyOptions = quiz.LobbyOptions{
 		MaxPlayers: 20,
+		Quizzes:    quizzesFS,
 	}
 )
 
@@ -80,7 +97,7 @@ func TestLobbyCreate(t *testing.T) {
 	)
 
 	assertEqual(t, 2, runtime.NumGoroutine())
-	handlers.CreateLobbyHandler(defaultTestConfig, lobbies)(res, req)
+	handlers.CreateLobbyHandler(defaultTestConfig, lobbies, quizzesFS)(res, req)
 	assertEqual(t, 3, runtime.NumGoroutine()) // Spawns goroutine for lobby timeout
 
 	httpRes := res.Result()
@@ -106,7 +123,10 @@ func TestLobbyCreate(t *testing.T) {
 func TestLobbyBanner(t *testing.T) {
 	var (
 		lobbies  = &quiz.Lobbies{}
-		lobby, _ = lobbies.Register(defaultTestLobbyOptions)
+		lobby, _ = lobbies.Register(quiz.LobbyOptions{
+			MaxPlayers: 20,
+			Quizzes:    quizzesFS,
+		})
 	)
 
 	s, cli, err := setupAndDialTestServer("GET /lobby/{id}", handlers.LobbyHandler(defaultTestConfig, lobbies, defaultTestUpgrader), "/lobby/"+lobby.ID())
@@ -157,7 +177,7 @@ func TestLobbyTimeout(t *testing.T) {
 	timeoutCfg := defaultTestConfig
 	timeoutCfg.Lobby.RegisterTimeout = time.Duration(0)
 
-	handlers.CreateLobbyHandler(timeoutCfg, lobbies)(res, req)
+	handlers.CreateLobbyHandler(timeoutCfg, lobbies, quizzesFS)(res, req)
 
 	apiRes := api.CreateLobbyResponse{}
 	err := json.NewDecoder(res.Body).Decode(&apiRes)
@@ -233,6 +253,7 @@ func TestLobbyMaxPlayers(t *testing.T) {
 		lobbies    = &quiz.Lobbies{}
 		lobby, _   = lobbies.Register(quiz.LobbyOptions{
 			MaxPlayers: maxPlayers,
+			Quizzes:    quizzesFS,
 		})
 		path = "/lobby/" + lobby.ID()
 	)
@@ -333,6 +354,30 @@ func TestLobbyKick(t *testing.T) {
 	assertLobbyUpdate(t, cli, kickUsername, "kick")
 }
 
+func TestLobbyConfigure(t *testing.T) {
+	var (
+		lobbies  = &quiz.Lobbies{}
+		lobby, _ = lobbies.Register(defaultTestLobbyOptions)
+
+		ownerUsername = "owner"
+		path          = "/lobby/" + lobby.ID()
+	)
+
+	s, cli, err := setupAndDialTestServer("GET /lobby/{id}", handlers.LobbyHandler(defaultTestConfig, lobbies, defaultTestUpgrader), path)
+	assertNil(t, err)
+	defer s.Close()
+	defer cli.Close()
+
+	// Setup lobby owner
+	wantLobby := defaultTestWantLobby
+	registerNewOwner(t, cli, &wantLobby, ownerUsername)
+
+	res, err := cli.Configure(wantLobby.Quizzes[1])
+	assertNil(t, err)
+	assertEqual(t, api.ResponseTypeConfigure, res.Type)
+	assertEqual(t, wantLobby.Quizzes[1], lobby.Quiz())
+}
+
 func assertLobby(t *testing.T, cli *client.Client, wantLobby api.LobbyData) {
 	t.Helper()
 
@@ -390,6 +435,8 @@ func assertLobbyBanner(t *testing.T, cli *client.Client, wantLobby api.LobbyData
 	assertEqual(t, wantLobby.MaxPlayers, lobbyData.MaxPlayers)
 	assertEqual(t, true, len(lobbyData.ID) == 5)
 	assertEqual(t, true, len(lobbyData.Created) > 0)
+	assertEqualSlices(t, wantLobby.Quizzes, lobbyData.Quizzes)
+	assertEqual(t, wantLobby.CurrentQuiz, lobbyData.CurrentQuiz)
 }
 
 func assertRegister(t *testing.T, cli *client.Client, username string) {
@@ -432,5 +479,12 @@ func assertNotNil(t *testing.T, got interface{}) {
 	t.Helper()
 	if got == nil || reflect.ValueOf(got).IsNil() {
 		t.Fatalf("assert not nil: got %v", got)
+	}
+}
+
+func assertEqualSlices[T comparable](t *testing.T, want, got []T) {
+	t.Helper()
+	if !slices.Equal(want, got) {
+		t.Errorf("assert equal: got %v, want %v", got, want)
 	}
 }

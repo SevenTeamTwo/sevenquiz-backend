@@ -1,7 +1,9 @@
 package main
 
 import (
+	"embed"
 	"errors"
+	"io/fs"
 	"log"
 	"net/http"
 	"os"
@@ -16,6 +18,9 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/rs/cors"
 )
+
+//go:embed quizzes
+var quizzes embed.FS
 
 func init() {
 	if os.Getenv("DEBUG") == "yes" {
@@ -38,6 +43,10 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+	quizzesFS, err := fs.Sub(quizzes, "quizzes")
+	if err != nil {
+		log.Fatal(err)
+	}
 
 	lobbies := &quiz.Lobbies{}
 	upgrader := websocket.Upgrader{
@@ -47,7 +56,7 @@ func main() {
 		},
 	}
 
-	createLobbyHandler := handlers.CreateLobbyHandler(cfg, lobbies)
+	createLobbyHandler := handlers.CreateLobbyHandler(cfg, lobbies, quizzesFS)
 	lobbyHandler := handlers.LobbyHandler(cfg, lobbies, upgrader)
 
 	http.Handle("POST /lobby", middleware.ChainDefaults(createLobbyHandler))

@@ -74,3 +74,13 @@ func (c *Client) Kick(username string) (api.Response, error) {
 	}
 	return c.sendCmd(req)
 }
+
+func (c *Client) Configure(quiz string) (api.Response, error) {
+	req := api.Request{
+		Type: api.RequestTypeConfigure,
+		Data: api.LobbyConfigureData{
+			Quiz: quiz,
+		},
+	}
+	return c.sendCmd(req)
+}
