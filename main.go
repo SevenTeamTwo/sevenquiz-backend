@@ -50,8 +50,8 @@ func main() {
 	createLobbyHandler := handlers.CreateLobbyHandler(cfg, lobbies)
 	lobbyHandler := handlers.LobbyHandler(cfg, lobbies, upgrader)
 
-	http.Handle("POST /lobby", middleware.ApplyDefaults(createLobbyHandler))
-	http.Handle("GET /lobby/{id}", middleware.ApplyDefaults(lobbyHandler))
+	http.Handle("POST /lobby", middleware.ChainDefaults(createLobbyHandler))
+	http.Handle("GET /lobby/{id}", middleware.ChainDefaults(lobbyHandler))
 
 	srv := http.Server{
 		Addr:         ":8080",

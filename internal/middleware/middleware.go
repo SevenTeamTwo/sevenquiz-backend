@@ -41,8 +41,8 @@ func RequestIDMiddleware(h http.Handler) http.Handler {
 	})
 }
 
-// ApplyDefaults chains the default middlewares from middleware.DefaultMiddlewares.
-func ApplyDefaults(h http.Handler) http.Handler {
+// ChainDefaults chains the default middlewares from middleware.DefaultMiddlewares.
+func ChainDefaults(h http.Handler) http.Handler {
 	for _, mw := range DefaultMiddlewares {
 		h = mw(h)
 	}
