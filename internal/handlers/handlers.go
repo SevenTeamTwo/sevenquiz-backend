@@ -100,7 +100,10 @@ func LobbyHandler(cfg config.Config, lobbies *quiz.Lobbies, upgrader gws.Upgrade
 		wsConn := websocket.NewConn(conn)
 		defer handleDisconnect(lobbies, lobby, wsConn)
 
-		handleRegister(cfg, lobby, wsConn)
+		switch lobby.State() {
+		case quiz.LobbyStateCreated, quiz.LobbyStateRegister:
+			handleRegister(cfg, lobby, wsConn)
+		}
 	}
 }
 
@@ -175,6 +178,8 @@ func handleRegister(cfg config.Config, lobby *quiz.Lobby, conn *websocket.Conn) 
 			handleLobbyRequest(lobby, conn)
 		case api.RequestTypeRegister:
 			handleRegisterRequest(cfg, lobby, conn, req.Data)
+		case api.RequestTypeKick:
+			handleKickRequest(cfg, lobby, conn, req.Data)
 		default:
 			apierrs.WebsocketErrorResponse(conn, nil, apierrs.InvalidRequestError("unknown request type"))
 			continue
@@ -233,6 +238,35 @@ func handleRegisterRequest(_ config.Config, lobby *quiz.Lobby, conn *websocket.C
 		if err := lobby.BroadcastPlayerUpdate(req.Username, "new owner"); err != nil {
 			log.Println(err)
 		}
+	}
+}
+
+func handleKickRequest(_ config.Config, lobby *quiz.Lobby, conn *websocket.Conn, data any) {
+	req, err := api.DecodeJSON[api.KickRequestData](data)
+	if err != nil {
+		apierrs.WebsocketErrorResponse(conn, err, apierrs.InvalidRequestError("invalid kick request"))
+		return
+	}
+	client, ok := lobby.GetPlayerByConn(conn)
+	if !ok || client == nil {
+		apierrs.WebsocketErrorResponse(conn, nil, apierrs.InvalidRequestError("user is not lobby owner"))
+		return
+	}
+	if client.Username() != lobby.Owner() {
+		apierrs.WebsocketErrorResponse(conn, nil, apierrs.InvalidRequestError("user is not lobby owner"))
+		return
+	}
+	if ok := lobby.DeletePlayer(req.Username); !ok {
+		apierrs.WebsocketErrorResponse(conn, nil, apierrs.InvalidRequestError("user not found"))
+	}
+	res := api.Response{
+		Type: api.ResponseTypeKick,
+	}
+	if err := conn.WriteJSON(res); err != nil {
+		log.Println(err)
+	}
+	if err := lobby.BroadcastPlayerUpdate(req.Username, "kick"); err != nil {
+		log.Println(err)
 	}
 }
 

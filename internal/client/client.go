@@ -47,3 +47,13 @@ func (c *Client) Register(username string) (api.Response, error) {
 	}
 	return c.sendCmd(req)
 }
+
+func (c *Client) Kick(username string) (api.Response, error) {
+	req := api.Request{
+		Type: api.RequestTypeKick,
+		Data: api.KickRequestData{
+			Username: username,
+		},
+	}
+	return c.sendCmd(req)
+}

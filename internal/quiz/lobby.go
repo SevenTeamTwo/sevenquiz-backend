@@ -214,9 +214,9 @@ func (l *Lobby) Broadcast(v any) error {
 	errs := errgroup.Group{}
 	for conn := range l.players {
 		errs.Go(func() error {
-		if conn == nil {
+			if conn == nil {
 				return nil
-		}
+			}
 			return conn.WriteJSON(v)
 		})
 	}
@@ -256,6 +256,27 @@ func (l *Lobby) ReplacePlayerConn(username string, newConn *websocket.Conn) (old
 	client.Connect()
 
 	return oldConn, replaced
+}
+
+// DeletePlayer finds a player by username, closes his websocket and
+// removes the player from the lobby.
+// It returns false if the player does not exists.
+func (l *Lobby) DeletePlayer(username string) bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.deletePlayer(username)
+}
+
+func (l *Lobby) deletePlayer(username string) bool {
+	conn, _, ok := l.getPlayer(username)
+	if !ok {
+		return false
+	}
+	if conn != nil {
+		conn.Close()
+	}
+	delete(l.players, conn)
+	return true
 }
 
 // DeletePlayerByConn removes a player in the lobby by finding

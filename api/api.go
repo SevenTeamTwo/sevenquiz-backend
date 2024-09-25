@@ -6,6 +6,7 @@ const (
 	ResponseTypeError        = "error"
 	ResponseTypeRegister     = "register"
 	ResponseTypeLobby        = "lobby"
+	ResponseTypeKick         = "kick"
 	ResponseTypePlayerUpdate = "playerUpdate"
 )
 
@@ -19,6 +20,7 @@ const (
 	RequestTypeError    = "error"
 	RequestTypeRegister = "register"
 	RequestTypeLobby    = "lobby"
+	RequestTypeKick     = "kick"
 )
 
 type Request struct {
@@ -45,6 +47,10 @@ type CreateLobbyResponse struct {
 }
 
 type RegisterRequestData struct {
+	Username string `json:"username"`
+}
+
+type KickRequestData struct {
 	Username string `json:"username"`
 }
 
