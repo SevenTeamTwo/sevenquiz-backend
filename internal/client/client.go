@@ -2,16 +2,21 @@ package client
 
 import (
 	"sevenquiz-backend/api"
+	"time"
 
 	"github.com/gorilla/websocket"
 )
 
 type Client struct {
-	conn *websocket.Conn
+	conn    *websocket.Conn
+	timeout time.Duration
 }
 
-func NewClient(conn *websocket.Conn) *Client {
-	return &Client{conn: conn}
+func NewClient(conn *websocket.Conn, timeout time.Duration) *Client {
+	return &Client{
+		conn:    conn,
+		timeout: timeout,
+	}
 }
 
 func (c *Client) Close() {
@@ -19,6 +24,12 @@ func (c *Client) Close() {
 }
 
 func (c *Client) sendCmd(req api.Request) (api.Response, error) {
+	if c.timeout > 0 {
+		deadline := time.Now().Add(c.timeout)
+		if err := c.conn.SetWriteDeadline(deadline); err != nil {
+			return api.Response{}, err
+		}
+	}
 	if err := c.conn.WriteJSON(req); err != nil {
 		return api.Response{}, err
 	}
@@ -26,6 +37,12 @@ func (c *Client) sendCmd(req api.Request) (api.Response, error) {
 }
 
 func (c *Client) ReadResponse() (api.Response, error) {
+	if c.timeout > 0 {
+		deadline := time.Now().Add(c.timeout)
+		if err := c.conn.SetReadDeadline(deadline); err != nil {
+			return api.Response{}, err
+		}
+	}
 	res := api.Response{}
 	err := c.conn.ReadJSON(&res)
 	return res, err

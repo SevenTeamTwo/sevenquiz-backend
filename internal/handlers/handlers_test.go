@@ -69,7 +69,7 @@ func dialTestServerWS(s *httptest.Server, path string) (*client.Client, *http.Re
 	if err != nil {
 		return nil, res, err
 	}
-	return client.NewClient(conn), res, nil
+	return client.NewClient(conn, time.Second), res, nil
 }
 
 func TestLobbyCreate(t *testing.T) {
