@@ -12,6 +12,7 @@ import (
 	"sevenquiz-backend/internal/websocket"
 
 	"github.com/golang-jwt/jwt"
+	"golang.org/x/sync/errgroup"
 )
 
 type LobbyState int
@@ -210,17 +211,16 @@ func (l *Lobby) Broadcast(v any) error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
-	errs := []error{}
+	errs := errgroup.Group{}
 	for conn := range l.players {
+		errs.Go(func() error {
 		if conn == nil {
-			continue
+				return nil
 		}
-		if err := conn.WriteJSON(v); err != nil {
-			errs = append(errs, err)
-		}
+			return conn.WriteJSON(v)
+		})
 	}
-
-	return errors.Join(errs...)
+	return errs.Wait()
 }
 
 // BroadcastPlayerUpdate broadcast a player event to all players
