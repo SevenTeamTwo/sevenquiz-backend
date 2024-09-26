@@ -82,8 +82,8 @@ func LobbyHandler(cfg config.Config, lobbies *quiz.Lobbies, upgrader gws.Upgrade
 			return
 		}
 
-		lobby := lobbies.Get(id)
-		if lobby == nil {
+		lobby, ok := lobbies.Get(id)
+		if !ok || lobby == nil {
 			apierrs.HTTPErrorResponse(w, http.StatusBadRequest, nil, apierrs.LobbyNotFoundError())
 			return
 		}

@@ -8,7 +8,6 @@ import (
 	"log"
 	"net/http"
 	"net/http/httptest"
-	"reflect"
 	"runtime"
 	"sevenquiz-backend/api"
 	"sevenquiz-backend/internal/client"
@@ -17,11 +16,11 @@ import (
 	"sevenquiz-backend/internal/handlers"
 	"sevenquiz-backend/internal/quiz"
 	"slices"
-	"sort"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/google/go-cmp/cmp"
 	"github.com/gorilla/websocket"
 )
 
@@ -67,424 +66,499 @@ var (
 )
 
 // param named "_pattern" to avoid unparam linter FP until new pattern is tested.
-func setupAndDialTestServer(_pattern string, handler http.HandlerFunc, path string) (*httptest.Server, *client.Client, error) {
-	s := setupTestServer(_pattern, handler)
-	cli, res, err := dialTestServerWS(s, path)
-	res.Body.Close()
-	return s, cli, err
+func mustCreateAndDialTestServer(t *testing.T, _pattern string, handler http.HandlerFunc, path string) (*httptest.Server, *client.Client, *http.Response) {
+	t.Helper()
+
+	s := newTestServer(_pattern, handler)
+	cli, res := mustDialTestServer(t, s, path)
+
+	t.Cleanup(func() {
+		s.Close()
+	})
+
+	return s, cli, res
 }
 
-func setupTestServer(pattern string, handler http.HandlerFunc) *httptest.Server {
+func newTestServer(pattern string, handler http.HandlerFunc) *httptest.Server {
 	mux := http.NewServeMux()
 	mux.HandleFunc(pattern, handler)
 	return httptest.NewServer(mux)
 }
 
-func dialTestServerWS(s *httptest.Server, path string) (*client.Client, *http.Response, error) {
+func mustDialTestServer(t *testing.T, s *httptest.Server, path string) (*client.Client, *http.Response) {
+	t.Helper()
+
 	url := "ws" + strings.TrimPrefix(s.URL, "http") + path
 	conn, res, err := websocket.DefaultDialer.Dial(url, nil)
 	if err != nil {
-		return nil, res, err
+		t.Fatalf("Error while dialing test server: %v", err)
 	}
-	return client.NewClient(conn, time.Second), res, nil
+
+	cli := client.NewClient(conn, time.Second)
+	t.Cleanup(func() {
+		cli.Close()
+		res.Body.Close()
+	})
+
+	return cli, res
 }
 
 func TestLobbyCreate(t *testing.T) {
 	var (
+		lobbies = &quiz.Lobbies{}
 		req     = httptest.NewRequest(http.MethodPost, "/lobby", nil)
 		res     = httptest.NewRecorder()
-		lobbies = &quiz.Lobbies{}
 	)
 
-	assertEqual(t, 2, runtime.NumGoroutine())
+	if got, want := runtime.NumGoroutine(), 2; got != want {
+		t.Errorf("Invalid amount of base goroutines, got %d, want %d", got, want)
+	}
+
+	// Should spawn a goroutine for lobby timeout.
 	handlers.CreateLobbyHandler(defaultTestConfig, lobbies, quizzesFS)(res, req)
-	assertEqual(t, 3, runtime.NumGoroutine()) // Spawns goroutine for lobby timeout
+
+	if got, want := runtime.NumGoroutine(), 3; got != want {
+		t.Error("Lobby's timeout goroutine did not spawn")
+	}
 
 	httpRes := res.Result()
 	defer httpRes.Body.Close()
 
-	assertEqual(t, http.StatusOK, httpRes.StatusCode)
+	if got, want := httpRes.StatusCode, http.StatusOK; got != want {
+		t.Fatalf("CreateLobbyHandler returned unexpected status code, got %d, want %d", got, want)
+	}
 
 	apiRes := api.CreateLobbyResponse{}
 	err := json.NewDecoder(res.Body).Decode(&apiRes)
-	assertNil(t, err)
+	if err != nil {
+		t.Fatalf("Unexpected error while decoding create lobby response: %v", err)
+	}
 
-	lobby := lobbies.Get(apiRes.LobbyID)
-	assertNotNil(t, lobby)
-	assertEqual(t, 5, len(lobby.ID()))
+	lobby, ok := lobbies.Get(apiRes.LobbyID)
+	if !ok || lobby == nil {
+		t.Fatal("Could not get created lobby")
+	}
+	lobbyID := lobby.ID()
+	if len(lobbyID) != 5 {
+		t.Errorf("Unexpected lobby id in lobby banner: %s", lobbyID)
+	}
 
-	lobbies.Delete(lobby.ID())
+	lobbies.Delete(lobbyID)
 	<-time.After(time.Millisecond)
 
-	// Make sure timeout goroutine is cleaned up.
-	assertEqual(t, 2, runtime.NumGoroutine())
+	if got, want := runtime.NumGoroutine(), 2; got != want {
+		t.Errorf("Lobby's timeout goroutine was not cleaned up")
+	}
 }
 
 func TestLobbyBanner(t *testing.T) {
 	var (
-		lobbies  = &quiz.Lobbies{}
-		lobby, _ = lobbies.Register(quiz.LobbyOptions{
+		lobbies, lobby = mustRegisterLobby(t, quiz.LobbyOptions{
 			MaxPlayers: 20,
 			Quizzes:    quizzesFS,
 		})
+		handler = handlers.LobbyHandler(defaultTestConfig, lobbies, defaultTestUpgrader)
+		path    = "/lobby/" + lobby.ID()
 	)
 
-	s, cli, err := setupAndDialTestServer("GET /lobby/{id}", handlers.LobbyHandler(defaultTestConfig, lobbies, defaultTestUpgrader), "/lobby/"+lobby.ID())
-	assertNil(t, err)
-	defer s.Close()
-	defer cli.Close()
+	_, cli, res := mustCreateAndDialTestServer(t, "GET /lobby/{id}", handler, path)
 
-	assertLobbyBanner(t, cli, defaultTestWantLobby)
+	apiRes, err := cli.ReadResponse()
+	if err != nil {
+		t.Fatalf("Could not read lobby banner: %v", err)
+	}
+
+	if apiRes.Type != api.ResponseTypeLobby {
+		t.Fatalf("Could not read lobby banner: got api response: %+v", res)
+	}
+
+	data, err := api.DecodeJSON[api.LobbyData](apiRes.Data)
+	if err != nil {
+		t.Fatalf("Could not decode lobby data: %v", err)
+	}
+
+	want := defaultTestWantLobby
+
+	if got, want := data.Owner, want.Owner; !cmp.Equal(got, want) {
+		t.Errorf("Unexpected owner in lobby banner: got %v, want %v", got, want)
+	}
+	if got, want := data.MaxPlayers, want.MaxPlayers; got != want {
+		t.Errorf("Unexpected max players in lobby banner: got %d, want %d", got, want)
+	}
+	if len(data.ID) != 5 {
+		t.Errorf("Unexpected lobby id in lobby banner: %s", data.ID)
+	}
+	if data.Created == "" {
+		t.Error("Missing created field in lobby banner")
+	}
+	if diff := cmp.Diff(want.Quizzes, data.Quizzes); diff != "" {
+		t.Errorf("Unexpected quizzes list in lobby banner (-want+got):\n%v", diff)
+	}
+	if got, want := data.CurrentQuiz, want.CurrentQuiz; got != want {
+		t.Errorf("Unexpected current quiz in lobby banner: got %s, want %s", got, want)
+	}
 }
 
 func TestLobbyRegister(t *testing.T) {
 	var (
-		lobbies  = &quiz.Lobbies{}
-		lobby, _ = lobbies.Register(defaultTestLobbyOptions)
-
-		registerUsername = "testuser"
+		lobbies, lobby = mustRegisterLobby(t, defaultTestLobbyOptions)
+		handler        = handlers.LobbyHandler(defaultTestConfig, lobbies, defaultTestUpgrader)
+		path           = "/lobby/" + lobby.ID()
 	)
 
-	s, cli, err := setupAndDialTestServer("GET /lobby/{id}", handlers.LobbyHandler(defaultTestConfig, lobbies, defaultTestUpgrader), "/lobby/"+lobby.ID())
-	assertNil(t, err)
-	defer s.Close()
-	defer cli.Close()
+	_, cli, _ := mustCreateAndDialTestServer(t, "GET /lobby/{id}", handler, path)
 
-	wantLobby := defaultTestWantLobby
-	registerNewOwner(t, cli, &wantLobby, registerUsername)
+	username := "testuser"
+	want := defaultTestWantLobby
 
-	_, quizCli, ok := lobby.GetPlayer(registerUsername)
-	assertEqual(t, true, ok)
-	assertNotNil(t, quizCli)
-	assertEqual(t, registerUsername, quizCli.Username())
+	mustRegisterOwner(t, cli, &want, username)
 
-	registerRes, err := cli.Register(registerUsername)
-	assertNil(t, err)
-	assertEqual(t, api.ResponseTypeError, registerRes.Type)
+	_, player, ok := lobby.GetPlayer(username)
+	if !ok || player == nil {
+		t.Fatalf("Could not get registered player")
+	}
+	if got, want := player.Username(), username; got != want {
+		t.Errorf("Invalid player username, got %s, want %s", got, want)
+	}
 
-	errorData, err := api.DecodeJSON[api.ErrorData](registerRes.Data)
-	assertNil(t, err)
-	assertEqual(t, apierrs.UserAlreadyRegisteredCode, errorData.Code)
+	res, err := cli.Register(username)
+	if err != nil {
+		t.Fatalf("Error while sending register command: %v", err)
+	}
+	if res.Type != api.ResponseTypeError {
+		t.Fatalf("Unexpected api response: %+v", res)
+	}
+
+	data, err := api.DecodeJSON[api.ErrorData](res.Data)
+	if err != nil {
+		t.Fatalf("Error while decoding register response: %v", err)
+	}
+	if got, want := data.Code, apierrs.UserAlreadyRegisteredCode; got != want {
+		t.Errorf("Invalid register error code, got %d, want %d", got, want)
+	}
 }
 
 func TestLobbyTimeout(t *testing.T) {
 	var (
+		lobbies = &quiz.Lobbies{}
 		req     = httptest.NewRequest(http.MethodPost, "/lobby", nil)
 		res     = httptest.NewRecorder()
-		lobbies = &quiz.Lobbies{}
 	)
 
-	timeoutCfg := defaultTestConfig
-	timeoutCfg.Lobby.RegisterTimeout = time.Duration(0)
+	cfg := defaultTestConfig
+	cfg.Lobby.RegisterTimeout = time.Duration(0)
 
-	handlers.CreateLobbyHandler(timeoutCfg, lobbies, quizzesFS)(res, req)
+	handlers.CreateLobbyHandler(cfg, lobbies, quizzesFS)(res, req)
 
-	apiRes := api.CreateLobbyResponse{}
-	err := json.NewDecoder(res.Body).Decode(&apiRes)
-	assertNil(t, err)
+	apiRes := &api.CreateLobbyResponse{}
+	if err := json.NewDecoder(res.Body).Decode(apiRes); err != nil {
+		t.Fatalf("Could not decode create lobby response: %v", err)
+	}
 
 	// wait for the goroutine to process the delete
 	time.Sleep(time.Millisecond)
 
-	assertNil(t, lobbies.Get(apiRes.LobbyID))
+	if lobby, ok := lobbies.Get(apiRes.LobbyID); ok || lobby != nil {
+		t.Error("Lobby was not deleted after timeout")
+	}
 }
 
 func TestLobbyPlayerList(t *testing.T) {
 	var (
-		lobbies  = &quiz.Lobbies{}
-		lobby, _ = lobbies.Register(defaultTestLobbyOptions)
-
-		ownerUsername = "owner"
-		path          = "/lobby/" + lobby.ID()
+		lobbies, lobby = mustRegisterLobby(t, defaultTestLobbyOptions)
+		handler        = handlers.LobbyHandler(defaultTestConfig, lobbies, defaultTestUpgrader)
+		path           = "/lobby/" + lobby.ID()
 	)
 
-	s, cli, err := setupAndDialTestServer("GET /lobby/{id}", handlers.LobbyHandler(defaultTestConfig, lobbies, defaultTestUpgrader), path)
-	assertNil(t, err)
-	defer s.Close()
-	defer cli.Close()
+	s, cli, _ := mustCreateAndDialTestServer(t, "GET /lobby/{id}", handler, path)
 
 	// Setup lobby owner
-	wantLobby := defaultTestWantLobby
-	registerNewOwner(t, cli, &wantLobby, ownerUsername)
+	owner := "owner"
+	want := defaultTestWantLobby
+	mustRegisterOwner(t, cli, &want, owner)
 
-	registerUsers := map[string]*client.Client{
+	players := map[string]*client.Client{
 		"testuser":  nil,
 		"testuser2": nil,
 		"testuser3": nil,
 	}
 
-	defer func() {
-		for _, cli := range registerUsers {
-			if cli == nil {
-				continue
-			}
-			cli.Close()
-		}
-	}()
+	for username := range players {
+		cli2, _ := mustDialTestServer(t, s, path)
+		players[username] = cli2
 
-	for username := range registerUsers {
-		cli2, res, err := dialTestServerWS(s, path)
-		res.Body.Close()
-		assertNil(t, err)
+		mustRegisterPlayer(t, cli2, &want, username)
+		mustLobbyUpdate(t, cli, username, "join")
 
-		registerUsers[username] = cli2
-		registerNewPlayer(t, cli2, &wantLobby, username)
-		assertLobbyUpdate(t, cli, username, "join")
-
-		wantLobby.PlayerList = append(wantLobby.PlayerList, username)
+		want.PlayerList = append(want.PlayerList, username)
 	}
 
 	// Make sure new players are now in the list.
-	sort.Strings(wantLobby.PlayerList)
-	assertLobby(t, cli, wantLobby)
+	mustLobby(t, cli, want)
 
-	registerUsers["testuser"].Close()
-	<-time.After(time.Millisecond)
-	assertLobbyUpdate(t, cli, "testuser", "disconnect")
+	for username, cli2 := range players {
+		cli2.Close()
+		<-time.After(time.Millisecond)
+		mustLobbyUpdate(t, cli, username, "disconnect")
 
-	// Make sure disconnected player is not on the list.
-	wantLobby.PlayerList = slices.Delete(wantLobby.PlayerList, 0, 1)
-	assertLobby(t, cli, wantLobby)
+		// Make sure disconnected player is not on the list.
+		want.PlayerList = slices.DeleteFunc(want.PlayerList, func(s string) bool {
+			return s == username
+		})
+		mustLobby(t, cli, want)
+	}
 }
 
 func TestLobbyMaxPlayers(t *testing.T) {
 	var (
-		maxPlayers = 1
-		lobbies    = &quiz.Lobbies{}
-		lobby, _   = lobbies.Register(quiz.LobbyOptions{
+		maxPlayers     = 1
+		lobbies, lobby = mustRegisterLobby(t, quiz.LobbyOptions{
 			MaxPlayers: maxPlayers,
 			Quizzes:    quizzesFS,
 		})
-		path = "/lobby/" + lobby.ID()
 	)
 
-	maxPlayersCfg := defaultTestConfig
-	maxPlayersCfg.Lobby.MaxPlayers = maxPlayers
+	cfg := defaultTestConfig
+	cfg.Lobby.MaxPlayers = maxPlayers
 
-	s, cli, err := setupAndDialTestServer("GET /lobby/{id}", handlers.LobbyHandler(maxPlayersCfg, lobbies, defaultTestUpgrader), path)
-	assertNil(t, err)
-	defer s.Close()
-	defer cli.Close()
+	handler := handlers.LobbyHandler(cfg, lobbies, defaultTestUpgrader)
+	path := "/lobby/" + lobby.ID()
+	s, cli, _ := mustCreateAndDialTestServer(t, "GET /lobby/{id}", handler, path)
 
 	// Setup lobby owner
-	wantLobby := defaultTestWantLobby
-	wantLobby.MaxPlayers = maxPlayers
-	registerNewOwner(t, cli, &wantLobby, "owner")
+	want := defaultTestWantLobby
+	want.MaxPlayers = maxPlayers
+	mustRegisterOwner(t, cli, &want, "owner")
 
 	// Make sure no players can join and be upgraded to websocket.
-	_, res, err := dialTestServerWS(s, path)
-	res.Body.Close()
-	assertNotNil(t, err)
-	assertEqual(t, http.StatusForbidden, res.StatusCode)
+	url := "ws" + strings.TrimPrefix(s.URL, "http") + path
+	conn, res, err := websocket.DefaultDialer.Dial(url, nil)
+	if conn != nil {
+		conn.Close()
+	}
+	if err == nil {
+		t.Errorf("Player was able to join a full lobby, response %+v", res)
+	}
 }
 
 func TestLobbyOwnerElection(t *testing.T) {
 	var (
-		lobbies  = &quiz.Lobbies{}
-		lobby, _ = lobbies.Register(defaultTestLobbyOptions)
-
-		ownerUsername = "owner"
-		path          = "/lobby/" + lobby.ID()
+		lobbies, lobby = mustRegisterLobby(t, defaultTestLobbyOptions)
+		handler        = handlers.LobbyHandler(defaultTestConfig, lobbies, defaultTestUpgrader)
+		path           = "/lobby/" + lobby.ID()
 	)
 
-	s, cli, err := setupAndDialTestServer("GET /lobby/{id}", handlers.LobbyHandler(defaultTestConfig, lobbies, defaultTestUpgrader), path)
-	assertNil(t, err)
-	defer s.Close()
-	defer cli.Close()
+	s, cli, _ := mustCreateAndDialTestServer(t, "GET /lobby/{id}", handler, path)
 
 	// Setup lobby owner
+	owner := "owner"
 	wantLobby := defaultTestWantLobby
-	registerNewOwner(t, cli, &wantLobby, ownerUsername)
+	mustRegisterOwner(t, cli, &wantLobby, owner)
 
 	// Setup second player to join
-	cli2, res, err := dialTestServerWS(s, path)
-	res.Body.Close()
-	assertNil(t, err)
+	cli2, _ := mustDialTestServer(t, s, path)
 
-	nextOwnerUsername := "nextowner"
-	registerNewPlayer(t, cli2, &wantLobby, nextOwnerUsername)
+	nextPlayer := "nextplayer"
+	mustRegisterPlayer(t, cli2, &wantLobby, nextPlayer)
 
 	// Close owner client, must be replaced by next player.
 	cli.Close()
-	assertLobbyUpdate(t, cli2, ownerUsername, "disconnect")
-	assertLobbyUpdate(t, cli2, nextOwnerUsername, "new owner")
-	assertEqual(t, lobby.Owner(), nextOwnerUsername)
+	mustLobbyUpdate(t, cli2, owner, "disconnect")
+	mustLobbyUpdate(t, cli2, nextPlayer, "new owner")
+	if got, want := lobby.Owner(), nextPlayer; got != want {
+		t.Errorf("Invalid lobby owner, got %s, want %s", got, want)
+	}
 
-	// Close new owner client, other players so lobby must be deleted.
+	// Close new owner client, no other players so lobby must be deleted.
 	cli2.Close()
 	<-time.After(time.Millisecond)
-	assertNil(t, lobbies.Get(lobby.ID()))
+
+	if lobby, ok := lobbies.Get(lobby.ID()); ok || lobby != nil {
+		t.Error("Lobby was not deleted after owner disconnect")
+	}
 }
 
 func TestLobbyKick(t *testing.T) {
 	var (
-		lobbies  = &quiz.Lobbies{}
-		lobby, _ = lobbies.Register(defaultTestLobbyOptions)
-
-		ownerUsername = "owner"
-		kickUsername  = "kick"
-		path          = "/lobby/" + lobby.ID()
+		lobbies, lobby = mustRegisterLobby(t, defaultTestLobbyOptions)
+		handler        = handlers.LobbyHandler(defaultTestConfig, lobbies, defaultTestUpgrader)
+		path           = "/lobby/" + lobby.ID()
 	)
 
-	s, cli, err := setupAndDialTestServer("GET /lobby/{id}", handlers.LobbyHandler(defaultTestConfig, lobbies, defaultTestUpgrader), path)
-	assertNil(t, err)
-	defer s.Close()
-	defer cli.Close()
+	s, cli, _ := mustCreateAndDialTestServer(t, "GET /lobby/{id}", handler, path)
 
 	// Setup lobby owner
+	owner := "owner"
 	wantLobby := defaultTestWantLobby
-	registerNewOwner(t, cli, &wantLobby, ownerUsername)
+	mustRegisterOwner(t, cli, &wantLobby, owner)
 
 	// Setup second player to join
-	cli2, res, err := dialTestServerWS(s, path)
-	res.Body.Close()
-	assertNil(t, err)
+	player := "player"
+	cli2, _ := mustDialTestServer(t, s, path)
 
-	registerNewPlayer(t, cli2, &wantLobby, kickUsername)
-	assertLobbyUpdate(t, cli, kickUsername, "join")
+	mustRegisterPlayer(t, cli2, &wantLobby, player)
+	mustLobbyUpdate(t, cli, player, "join")
 
-	// User is not owner, kick must not be possible
-	kickRes, err := cli2.Kick(ownerUsername)
-	assertNil(t, err)
-	assertEqual(t, api.ResponseTypeError, kickRes.Type)
+	// Player is not owner, kick must not be possible.
+	res, err := cli2.Kick(owner)
+	if err != nil {
+		t.Fatalf("Unexpected error while trying to kick %s: %v", owner, err)
+	}
+	if got, want := res.Type, api.ResponseTypeError; got != want {
+		t.Errorf("Invalid kick command response, got %s, want %s, response %+v", got, want, res)
+	}
 
-	kickRes, err = cli.Kick(kickUsername)
-	assertNil(t, err)
-	assertEqual(t, api.ResponseTypeKick, kickRes.Type)
-	assertLobbyUpdate(t, cli, kickUsername, "kick")
+	res, err = cli.Kick(player)
+	if err != nil {
+		t.Fatalf("Unexpected error while trying to kick %s: %v", player, err)
+	}
+	if got, want := res.Type, api.ResponseTypeKick; got != want {
+		t.Errorf("Invalid kick command response, got %s, want %s, response %+v", got, want, res)
+	}
+
+	mustLobbyUpdate(t, cli, player, "kick")
 }
 
 func TestLobbyConfigure(t *testing.T) {
 	var (
-		lobbies  = &quiz.Lobbies{}
-		lobby, _ = lobbies.Register(defaultTestLobbyOptions)
-
-		ownerUsername = "owner"
-		path          = "/lobby/" + lobby.ID()
+		lobbies, lobby = mustRegisterLobby(t, defaultTestLobbyOptions)
+		handler        = handlers.LobbyHandler(defaultTestConfig, lobbies, defaultTestUpgrader)
+		path           = "/lobby/" + lobby.ID()
 	)
 
-	s, cli, err := setupAndDialTestServer("GET /lobby/{id}", handlers.LobbyHandler(defaultTestConfig, lobbies, defaultTestUpgrader), path)
-	assertNil(t, err)
-	defer s.Close()
-	defer cli.Close()
+	_, cli, _ := mustCreateAndDialTestServer(t, "GET /lobby/{id}", handler, path)
 
 	// Setup lobby owner
+	owner := "owner"
 	wantLobby := defaultTestWantLobby
-	registerNewOwner(t, cli, &wantLobby, ownerUsername)
+	mustRegisterOwner(t, cli, &wantLobby, owner)
 
 	res, err := cli.Configure(wantLobby.Quizzes[1])
-	assertNil(t, err)
-	assertEqual(t, api.ResponseTypeConfigure, res.Type)
-	assertEqual(t, wantLobby.Quizzes[1], lobby.Quiz())
+	if err != nil {
+		t.Fatalf("Error while sending configure command: %v", err)
+	}
+	if got, want := res.Type, api.ResponseTypeConfigure; got != want {
+		t.Errorf("Invalid configure response type: got %s, want %s", got, want)
+	}
+	if got, want := lobby.Quiz(), wantLobby.Quizzes[1]; got != want {
+		t.Errorf("Invalid configured quiz in lobby: got %s, want %s", got, want)
+	}
 }
 
-func assertLobby(t *testing.T, cli *client.Client, wantLobby api.LobbyData) {
+func mustRegisterLobby(t *testing.T, opts quiz.LobbyOptions) (*quiz.Lobbies, *quiz.Lobby) {
+	t.Helper()
+
+	lobbies := &quiz.Lobbies{}
+	lobby, err := lobbies.Register(opts)
+	if err != nil {
+		t.Fatalf("Could not register lobby: %v", err)
+	}
+	return lobbies, lobby
+}
+
+func mustLobby(t *testing.T, cli *client.Client, want api.LobbyData) {
 	t.Helper()
 
 	res, err := cli.Lobby()
-	assertNil(t, err)
-	assertEqual(t, api.ResponseTypeLobby, res.Type)
-
-	lobbyData, err := api.DecodeJSON[api.LobbyData](res.Data)
-	assertNil(t, err)
-
-	if wantLobby.Owner == nil {
-		assertNil(t, lobbyData.Owner)
-	} else {
-		assertNotNil(t, lobbyData.Owner)
-		assertEqual(t, *wantLobby.Owner, *lobbyData.Owner)
+	if err != nil {
+		t.Fatalf("Error while sending lobby command: %v", err)
 	}
-	assertEqual(t, wantLobby.MaxPlayers, lobbyData.MaxPlayers)
-	assertEqual(t, true, len(lobbyData.ID) == 5)
-	assertEqual(t, true, len(lobbyData.Created) > 0)
+
+	mustDecodeLobbyData(t, res, want)
 }
 
-func registerNewPlayer(t *testing.T, cli *client.Client, wantLobby *api.LobbyData, username string) {
-	t.Helper()
-
-	assertLobbyBanner(t, cli, *wantLobby)
-	assertRegister(t, cli, username)
-	assertLobbyUpdate(t, cli, username, "join")
-	wantLobby.PlayerList = append(wantLobby.PlayerList, username)
-}
-
-func registerNewOwner(t *testing.T, cli *client.Client, wantLobby *api.LobbyData, username string) {
-	t.Helper()
-
-	registerNewPlayer(t, cli, wantLobby, username)
-	assertLobbyUpdate(t, cli, username, "new owner")
-	wantLobby.Owner = &username
-}
-
-func assertLobbyBanner(t *testing.T, cli *client.Client, wantLobby api.LobbyData) {
-	t.Helper()
-
-	lobbyRes, err := cli.ReadResponse()
-	assertNil(t, err)
-	assertEqual(t, api.ResponseTypeLobby, lobbyRes.Type)
-
-	lobbyData, err := api.DecodeJSON[api.LobbyData](lobbyRes.Data)
-	assertNil(t, err)
-
-	if wantLobby.Owner == nil {
-		assertNil(t, lobbyData.Owner)
-	} else {
-		assertNotNil(t, lobbyData.Owner)
-		assertEqual(t, *wantLobby.Owner, *lobbyData.Owner)
-	}
-	assertEqual(t, wantLobby.MaxPlayers, lobbyData.MaxPlayers)
-	assertEqual(t, true, len(lobbyData.ID) == 5)
-	assertEqual(t, true, len(lobbyData.Created) > 0)
-	assertEqualSlices(t, wantLobby.Quizzes, lobbyData.Quizzes)
-	assertEqual(t, wantLobby.CurrentQuiz, lobbyData.CurrentQuiz)
-}
-
-func assertRegister(t *testing.T, cli *client.Client, username string) {
-	t.Helper()
-
-	res, err := cli.Register(username)
-	assertNil(t, err)
-	assertEqual(t, api.ResponseTypeRegister, res.Type)
-}
-
-func assertLobbyUpdate(t *testing.T, cli *client.Client, username, action string) {
+func mustLobbyBanner(t *testing.T, cli *client.Client, want api.LobbyData) {
 	t.Helper()
 
 	res, err := cli.ReadResponse()
-	assertNil(t, err)
+	if err != nil {
+		t.Fatalf("Could not read lobby banner: %v", err)
+	}
 
-	lobbyUpdateData, err := api.DecodeJSON[api.PlayerUpdateResponseData](res.Data)
-	assertNil(t, err)
-
-	assertEqual(t, res.Type, api.ResponseTypePlayerUpdate)
-	assertEqual(t, username, lobbyUpdateData.Username)
-	assertEqual(t, action, lobbyUpdateData.Action)
+	mustDecodeLobbyData(t, res, want)
 }
 
-func assertEqual(t *testing.T, want, got interface{}) {
+func mustDecodeLobbyData(t *testing.T, res api.Response, want api.LobbyData) {
 	t.Helper()
-	if want != got {
-		t.Errorf("assert equal: got %v (type %v), want %v (type %v)", got, reflect.TypeOf(got), want, reflect.TypeOf(want))
+
+	if res.Type != api.ResponseTypeLobby {
+		t.Fatalf("Could not read lobby banner: got api response: %+v", res)
+	}
+
+	data, err := api.DecodeJSON[api.LobbyData](res.Data)
+	if err != nil {
+		t.Fatalf("Could not decode lobby data: %v", data)
+	}
+	if got, want := data.Owner, want.Owner; !cmp.Equal(got, want) {
+		t.Fatalf("Unexpected owner in lobby banner: got %v, want %v", got, want)
+	}
+	if got, want := data.MaxPlayers, want.MaxPlayers; got != want {
+		t.Fatalf("Unexpected max players in lobby banner: got %d, want %d", got, want)
+	}
+	if len(data.ID) != 5 {
+		t.Fatalf("Unexpected lobby id in lobby banner: %s", data.ID)
+	}
+	if data.Created == "" {
+		t.Fatal("Missing created field in lobby banner")
+	}
+	if diff := cmp.Diff(want.Quizzes, data.Quizzes); diff != "" {
+		t.Fatalf("Unexpected quizzes list in lobby banner (-want+got):\n%v", diff)
+	}
+	if got, want := data.CurrentQuiz, want.CurrentQuiz; got != want {
+		t.Fatalf("Unexpected current quiz in lobby banner: got %s, want %s", got, want)
 	}
 }
 
-func assertNil(t *testing.T, got interface{}) {
+func mustRegisterPlayer(t *testing.T, cli *client.Client, wantLobby *api.LobbyData, username string) {
 	t.Helper()
-	if !(got == nil || reflect.ValueOf(got).IsNil()) {
-		t.Fatalf("assert nil: got %v", got)
+
+	mustLobbyBanner(t, cli, *wantLobby)
+	mustRegister(t, cli, username)
+	mustLobbyUpdate(t, cli, username, "join")
+
+	wantLobby.PlayerList = append(wantLobby.PlayerList, username)
+}
+
+func mustRegisterOwner(t *testing.T, cli *client.Client, wantLobby *api.LobbyData, username string) {
+	t.Helper()
+
+	mustRegisterPlayer(t, cli, wantLobby, username)
+	mustLobbyUpdate(t, cli, username, "new owner")
+
+	wantLobby.Owner = &username
+}
+
+func mustRegister(t *testing.T, cli *client.Client, username string) {
+	t.Helper()
+
+	res, err := cli.Register(username)
+	if err != nil {
+		t.Fatalf("Could not register username: %v", err)
+	}
+	if res.Type != api.ResponseTypeRegister {
+		t.Fatalf("Could not register username: got api response: %+v", res)
 	}
 }
 
-func assertNotNil(t *testing.T, got interface{}) {
+func mustLobbyUpdate(t *testing.T, cli *client.Client, username, action string) {
 	t.Helper()
-	if got == nil || reflect.ValueOf(got).IsNil() {
-		t.Fatalf("assert not nil: got %v", got)
-	}
-}
 
-func assertEqualSlices[T comparable](t *testing.T, want, got []T) {
-	t.Helper()
-	if !slices.Equal(want, got) {
-		t.Errorf("assert equal: got %v, want %v", got, want)
+	res, err := cli.ReadResponse()
+	if err != nil {
+		t.Fatalf("Could not read lobby update response: %v", err)
+	}
+	if res.Type != api.ResponseTypePlayerUpdate {
+		t.Fatalf("Could not read lobby update response: got api response: %+v", res)
+	}
+
+	data, err := api.DecodeJSON[api.PlayerUpdateResponseData](res.Data)
+	if err != nil {
+		t.Fatalf("Could not decode lobby update data: %v", data)
+	}
+	if username != data.Username {
+		t.Fatalf("Unexpected username returned in lobby update: %s", data.Username)
+	}
+	if action != data.Action {
+		t.Fatalf("Unexpected action returned in lobby update: %s", data.Action)
 	}
 }

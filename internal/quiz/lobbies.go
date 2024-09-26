@@ -96,10 +96,11 @@ func newLobbyID() string {
 }
 
 // Get retrieves a lobby by unique id.
-func (l *Lobbies) Get(id string) *Lobby {
+func (l *Lobbies) Get(id string) (*Lobby, bool) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	return l.lobbies[id]
+	lobby, ok := l.lobbies[id]
+	return lobby, ok
 }
 
 // Delete closes all lobby conns before deleting it.
