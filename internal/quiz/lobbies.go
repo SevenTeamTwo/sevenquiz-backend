@@ -2,6 +2,7 @@ package quiz
 
 import (
 	"errors"
+	"fmt"
 	"io/fs"
 	"sevenquiz-backend/internal/websocket"
 	"sync"
@@ -34,6 +35,11 @@ type LobbyOptions struct {
 	// Quizzes registers an embed filesystem holding all quizzes
 	// questions and assets.
 	Quizzes fs.FS
+
+	// JWTSalt is an optional salt to be used while generating the
+	// lobby's jwt key. It helps making the key more unique otherwise
+	// only a combination of the ID and timestamp is used.
+	JWTSalt []byte
 }
 
 // Register tries to register a new lobby and returns an error
@@ -43,16 +49,19 @@ func (l *Lobbies) Register(opts LobbyOptions) (*Lobby, error) {
 		opts.MaxPlayers = 25
 	}
 
+	id := newLobbyID()
+	created := time.Now()
+
 	lobby := &Lobby{
-		id:            newLobbyID(),
-		owner:         opts.Owner,
-		maxPlayers:    opts.MaxPlayers,
-		quizzes:       opts.Quizzes,
-		tokenValidity: shortuuid.New(),
-		players:       map[*websocket.Conn]*LobbyPlayer{},
-		created:       time.Now(),
-		state:         LobbyStateCreated,
-		doneCh:        make(chan struct{}),
+		id:         id,
+		owner:      opts.Owner,
+		maxPlayers: opts.MaxPlayers,
+		quizzes:    opts.Quizzes,
+		jwtKey:     newLobbyTokenKey(opts.JWTSalt, id, created),
+		players:    map[*websocket.Conn]*LobbyPlayer{},
+		created:    created,
+		state:      LobbyStateCreated,
+		doneCh:     make(chan struct{}),
 	}
 
 	quizzes, err := lobby.listQuizzes()
@@ -93,6 +102,13 @@ func (l *Lobbies) Register(opts LobbyOptions) (*Lobby, error) {
 func newLobbyID() string {
 	shortid := shortuuid.New()
 	return shortid[:5]
+}
+
+// newLobbyTokenKey creates a dedicated jwt key associated to a lobby.
+func newLobbyTokenKey(secret []byte, id string, created time.Time) []byte {
+	key := fmt.Sprintf("%s%s%d", secret, id, created.Unix())
+	hexkey := fmt.Sprintf("%x", key)
+	return []byte(hexkey)
 }
 
 // Get retrieves a lobby by unique id.

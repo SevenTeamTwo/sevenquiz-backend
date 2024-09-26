@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"sevenquiz-backend/api"
-	"sevenquiz-backend/internal/config"
 	"sevenquiz-backend/internal/websocket"
 
 	"github.com/golang-jwt/jwt"
@@ -38,15 +37,11 @@ type Lobby struct {
 	quizzes      fs.FS
 	selectedQuiz string
 
-	// tokenValidity invalidates an access token if the "tokenValidity" claim
-	// doesn't match. Since lobby ids are short-sized, it prevents previous
-	// lobby owner/players from accessing a newly created lobby with the old token.
-	tokenValidity string
-
 	// players represents all the active players in a lobby.
 	// A LobbyPlayer != nil means a websocket has issued the register cmd.
 	players map[*websocket.Conn]*LobbyPlayer
 
+	jwtKey  []byte
 	created time.Time
 	mu      sync.Mutex
 	state   LobbyState
@@ -233,13 +228,6 @@ func (l *Lobby) GetPlayerByConn(conn *websocket.Conn) (*LobbyPlayer, bool) {
 	return c, ok
 }
 
-// SetTokenValidity updates the lobby token validity.
-func (l *Lobby) SetTokenValidity(tv string) {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	l.tokenValidity = tv
-}
-
 // AddPlayerWithConn registers a conn to a lobby player.
 func (l *Lobby) AddPlayerWithConn(conn *websocket.Conn, username string) *LobbyPlayer {
 	l.mu.Lock()
@@ -349,31 +337,26 @@ func (l *Lobby) deleteConn(conn *websocket.Conn) {
 }
 
 // NewToken generates a new jwt token associated to a username.
-// This token holds two required claims for validation such as
-// the lobbyId and the tokenValidity.
-func (l *Lobby) NewToken(cfg config.Config, username string) (string, error) {
+func (l *Lobby) NewToken(username string) (string, error) {
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
-		"lobbyId":       l.id,
-		"tokenValidity": l.tokenValidity,
-		"username":      username,
+		"lobbyId":  l.id,
+		"username": username,
 	})
-	return token.SignedString(cfg.JWTSecret)
+	return token.SignedString(l.jwtKey)
 }
 
 // CheckToken validates a token against the configured jwt secret.
-// A check fails if the lobbyId or tokenValidity doesn't match the
-// associated lobby.
-func (l *Lobby) CheckToken(cfg config.Config, token string) (jwt.MapClaims, error) {
-	jwtToken, err := jwt.Parse(token, jwtKeyFunc(cfg))
+//
+// A check fails if the lobbyId doesn't match the associated lobby.
+func (l *Lobby) CheckToken(token string) (jwt.MapClaims, error) {
+	jwtToken, err := jwt.Parse(token, jwtKeyFunc(l.jwtKey))
 	if err != nil {
 		return nil, err
 	}
-
 	claimsMap, ok := jwtToken.Claims.(jwt.MapClaims)
 	if !ok {
 		return nil, errors.New("invalid jwt claims")
 	}
-
 	lobbyID, ok := getStringClaim(claimsMap, "lobbyId")
 	if !ok {
 		return nil, errors.New("token has no lobbyId claim")
@@ -381,15 +364,6 @@ func (l *Lobby) CheckToken(cfg config.Config, token string) (jwt.MapClaims, erro
 	if lobbyID != l.id {
 		return nil, errors.New("token does not match lobby id")
 	}
-
-	tokenValidity, ok := getStringClaim(claimsMap, "tokenValidity")
-	if !ok {
-		return nil, errors.New("token has no tokenValidity claim")
-	}
-	if tokenValidity != l.tokenValidity {
-		return nil, errors.New("token does not match token validity")
-	}
-
 	return claimsMap, nil
 }
 
@@ -399,16 +373,15 @@ func getStringClaim(claims jwt.MapClaims, claim string) (string, bool) {
 		return "", false
 	}
 	claimStr, ok := claimAny.(string)
-
 	return claimStr, ok
 }
 
-func jwtKeyFunc(cfg config.Config) jwt.Keyfunc {
+func jwtKeyFunc(key []byte) jwt.Keyfunc {
 	return func(token *jwt.Token) (any, error) {
 		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
 			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
 		}
-		return cfg.JWTSecret, nil
+		return key, nil
 	}
 }
 
