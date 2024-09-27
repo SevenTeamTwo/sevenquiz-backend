@@ -1,6 +1,7 @@
 package config
 
 import (
+	"os"
 	"reflect"
 	"time"
 
@@ -23,8 +24,10 @@ func LoadConfig(path string) (Config, error) {
 	if path == "" {
 		path = ".env"
 	}
-	if err := godotenv.Load(path); err != nil {
-		return Config{}, err
+	if _, err := os.Stat(path); err == nil {
+		if err = godotenv.Load(path); err != nil {
+			return Config{}, err
+		}
 	}
 	cfg := Config{}
 	err := env.ParseWithOptions(&cfg, env.Options{
