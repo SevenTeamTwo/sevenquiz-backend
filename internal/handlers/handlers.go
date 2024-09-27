@@ -349,6 +349,9 @@ func handleConfigureRequest(ctx context.Context, lobby *quiz.Lobby, conn *websoc
 	if err := wsjson.Write(ctx, conn, res); err != nil {
 		log.Println(err)
 	}
+	if err := lobby.BroadcastConfigure(ctx, req.Quiz); err != nil {
+		log.Println(err)
+	}
 }
 
 func validateUsername(username string) error {

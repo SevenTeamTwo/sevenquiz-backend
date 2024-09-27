@@ -285,7 +285,7 @@ func TestLobbyPlayerList(t *testing.T) {
 		players[username] = cli2
 
 		mustRegisterPlayer(t, cli2, &want, username)
-		mustLobbyUpdate(t, cli, username, "join")
+		mustBroadcastPlayerUpdate(t, cli, username, "join")
 
 		want.PlayerList = append(want.PlayerList, username)
 	}
@@ -296,7 +296,7 @@ func TestLobbyPlayerList(t *testing.T) {
 	for username, cli2 := range players {
 		cli2.Close()
 		<-time.After(time.Millisecond)
-		mustLobbyUpdate(t, cli, username, "disconnect")
+		mustBroadcastPlayerUpdate(t, cli, username, "disconnect")
 
 		// Make sure disconnected player is not on the list.
 		want.PlayerList = slices.DeleteFunc(want.PlayerList, func(s string) bool {
@@ -360,8 +360,8 @@ func TestLobbyOwnerElection(t *testing.T) {
 
 	// Close owner client, must be replaced by next player.
 	cli.Close()
-	mustLobbyUpdate(t, cli2, owner, "disconnect")
-	mustLobbyUpdate(t, cli2, nextPlayer, "new owner")
+	mustBroadcastPlayerUpdate(t, cli2, owner, "disconnect")
+	mustBroadcastPlayerUpdate(t, cli2, nextPlayer, "new owner")
 	if got, want := lobby.Owner(), nextPlayer; got != want {
 		t.Errorf("Invalid lobby owner, got %s, want %s", got, want)
 	}
@@ -394,7 +394,7 @@ func TestLobbyKick(t *testing.T) {
 	cli2, _ := mustDialTestServer(t, s, path)
 
 	mustRegisterPlayer(t, cli2, &wantLobby, player)
-	mustLobbyUpdate(t, cli, player, "join")
+	mustBroadcastPlayerUpdate(t, cli, player, "join")
 
 	// Player is not owner, kick must not be possible.
 	res, err := cli2.Kick(owner)
@@ -413,7 +413,7 @@ func TestLobbyKick(t *testing.T) {
 		t.Errorf("Invalid kick command response, got %s, want %s, response %+v", got, want, res)
 	}
 
-	mustLobbyUpdate(t, cli, player, "kick")
+	mustBroadcastPlayerUpdate(t, cli, player, "kick")
 }
 
 func TestLobbyConfigure(t *testing.T) {
@@ -437,6 +437,9 @@ func TestLobbyConfigure(t *testing.T) {
 	if got, want := res.Type, api.ResponseTypeConfigure; got != want {
 		t.Errorf("Invalid configure response type: got %s, want %s", got, want)
 	}
+
+	mustBroadcastConfigure(t, cli, wantLobby.Quizzes[1])
+
 	if got, want := lobby.Quiz(), wantLobby.Quizzes[1]; got != want {
 		t.Errorf("Invalid configured quiz in lobby: got %s, want %s", got, want)
 	}
@@ -511,7 +514,7 @@ func mustRegisterPlayer(t *testing.T, cli *client.Client, wantLobby *api.LobbyDa
 
 	mustLobbyBanner(t, cli, *wantLobby)
 	mustRegister(t, cli, username)
-	mustLobbyUpdate(t, cli, username, "join")
+	mustBroadcastPlayerUpdate(t, cli, username, "join")
 
 	wantLobby.PlayerList = append(wantLobby.PlayerList, username)
 }
@@ -520,7 +523,7 @@ func mustRegisterOwner(t *testing.T, cli *client.Client, wantLobby *api.LobbyDat
 	t.Helper()
 
 	mustRegisterPlayer(t, cli, wantLobby, username)
-	mustLobbyUpdate(t, cli, username, "new owner")
+	mustBroadcastPlayerUpdate(t, cli, username, "new owner")
 
 	wantLobby.Owner = &username
 }
@@ -537,25 +540,45 @@ func mustRegister(t *testing.T, cli *client.Client, username string) {
 	}
 }
 
-func mustLobbyUpdate(t *testing.T, cli *client.Client, username, action string) {
+func mustBroadcastPlayerUpdate(t *testing.T, cli *client.Client, username, action string) {
 	t.Helper()
 
 	res, err := cli.ReadResponse()
 	if err != nil {
-		t.Fatalf("Could not read lobby update response: %v", err)
+		t.Fatalf("Could not read lobby update broadcast: %v", err)
 	}
 	if res.Type != api.ResponseTypePlayerUpdate {
-		t.Fatalf("Could not read lobby update response: got api response: %+v", res)
+		t.Fatalf("Could not read lobby update broadcast: got api response: %+v", res)
 	}
 
 	data, err := api.DecodeJSON[api.PlayerUpdateResponseData](res.Data)
 	if err != nil {
-		t.Fatalf("Could not decode lobby update data: %v", data)
+		t.Fatalf("Could not decode lobby update broadcast data: %v", data)
 	}
 	if username != data.Username {
-		t.Fatalf("Unexpected username returned in lobby update: %s", data.Username)
+		t.Fatalf("Unexpected username returned in lobby update broadcast: %s", data.Username)
 	}
 	if action != data.Action {
-		t.Fatalf("Unexpected action returned in lobby update: %s", data.Action)
+		t.Fatalf("Unexpected action returned in lobby update broadcast: %s", data.Action)
+	}
+}
+
+func mustBroadcastConfigure(t *testing.T, cli *client.Client, quiz string) {
+	t.Helper()
+
+	res, err := cli.ReadResponse()
+	if err != nil {
+		t.Fatalf("Could not read configure broadcast: %v", err)
+	}
+	if res.Type != api.ResponseTypeConfigure {
+		t.Fatalf("Could not read configure broadcast: got api response: %+v", res)
+	}
+
+	data, err := api.DecodeJSON[api.LobbyConfigureData](res.Data)
+	if err != nil {
+		t.Fatalf("Could not decode configure broadcast data: %v", data)
+	}
+	if quiz != data.Quiz {
+		t.Fatalf("Unexpected quiz returned in configure broadcast: %s", data.Quiz)
 	}
 }

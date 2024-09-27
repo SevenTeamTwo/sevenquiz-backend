@@ -281,6 +281,16 @@ func (l *Lobby) BroadcastPlayerUpdate(ctx context.Context, username, action stri
 	return l.Broadcast(ctx, res)
 }
 
+func (l *Lobby) BroadcastConfigure(ctx context.Context, quiz string) error {
+	res := api.Response{
+		Type: api.ResponseTypeConfigure,
+		Data: api.LobbyConfigureData{
+			Quiz: quiz,
+		},
+	}
+	return l.Broadcast(ctx, res)
+}
+
 // ReplacePlayerConn replaces a conn for the specified player and
 // returns the oldConn with a bool describing if a replace happened.
 func (l *Lobby) ReplacePlayerConn(username string, newConn *websocket.Conn) (oldConn *websocket.Conn, replaced bool) {
