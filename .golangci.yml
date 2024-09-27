@@ -104,9 +104,8 @@ linters-settings:
       - (net/http.ResponseWriter).Write
       - (io.ReadCloser).Close
       - (*sevenquiz-backend/internal/websocket.Conn).Close
-      - (*github.com/gorilla/websocket.Conn).Close
-      - (*github.com/gorilla/websocket.Conn).WriteMessage
-      - (*github.com/gorilla/websocket.Conn).WriteJSON
+      - (*github.com/coder/websocket.Conn).Close
+      - (*github.com/coder/websocket.Conn).CloseNow
   gosec:
     excludes:
       - G104

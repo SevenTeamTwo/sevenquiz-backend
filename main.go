@@ -15,7 +15,7 @@ import (
 	"sevenquiz-backend/internal/quiz"
 
 	"github.com/MadAppGang/httplog"
-	"github.com/gorilla/websocket"
+	"github.com/coder/websocket"
 	"github.com/rs/cors"
 )
 
@@ -49,15 +49,12 @@ func main() {
 	}
 
 	lobbies := &quiz.Lobbies{}
-	upgrader := websocket.Upgrader{
-		HandshakeTimeout: 15 * time.Second,
-		CheckOrigin: func(_ *http.Request) bool {
-			return true // Accepting all requests
-		},
+	acceptOpts := websocket.AcceptOptions{
+		InsecureSkipVerify: true,
 	}
 
 	createLobbyHandler := handlers.CreateLobbyHandler(cfg, lobbies, quizzesFS)
-	lobbyHandler := handlers.LobbyHandler(cfg, lobbies, upgrader)
+	lobbyHandler := handlers.LobbyHandler(cfg, lobbies, acceptOpts)
 
 	http.Handle("POST /lobby", middleware.ChainDefaults(createLobbyHandler))
 	http.Handle("GET /lobby/{id}", middleware.ChainDefaults(lobbyHandler))

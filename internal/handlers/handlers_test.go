@@ -1,6 +1,7 @@
 package handlers_test
 
 import (
+	"context"
 	"embed"
 	"encoding/json"
 	"io"
@@ -20,8 +21,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/coder/websocket"
 	"github.com/google/go-cmp/cmp"
-	"github.com/gorilla/websocket"
 )
 
 var (
@@ -44,15 +45,13 @@ var (
 	defaultTestConfig = config.Config{
 		JWTSecret: []byte("myjwtsecret1234"),
 		Lobby: config.LobbyConf{
-			MaxPlayers:      20,
-			RegisterTimeout: 15 * time.Second,
+			MaxPlayers:         20,
+			RegisterTimeout:    15 * time.Second,
+			WebsocketReadLimit: 512,
 		},
 	}
-	defaultTestUpgrader = websocket.Upgrader{
-		HandshakeTimeout: 15 * time.Second,
-		CheckOrigin: func(_ *http.Request) bool {
-			return true // Accepting all requests
-		},
+	defaultTestAcceptOptions = websocket.AcceptOptions{
+		InsecureSkipVerify: true,
 	}
 	defaultTestWantLobby = api.LobbyData{
 		MaxPlayers:  20,
@@ -89,15 +88,13 @@ func mustDialTestServer(t *testing.T, s *httptest.Server, path string) (*client.
 	t.Helper()
 
 	url := "ws" + strings.TrimPrefix(s.URL, "http") + path
-	conn, res, err := websocket.DefaultDialer.Dial(url, nil)
+	cli, res, err := client.Dial(context.Background(), url, nil)
 	if err != nil {
 		t.Fatalf("Error while dialing test server: %v", err)
 	}
 
-	cli := client.NewClient(conn, time.Second)
 	t.Cleanup(func() {
 		cli.Close()
-		res.Body.Close()
 	})
 
 	return cli, res
@@ -157,7 +154,7 @@ func TestLobbyBanner(t *testing.T) {
 			MaxPlayers: 20,
 			Quizzes:    quizzesFS,
 		})
-		handler = handlers.LobbyHandler(defaultTestConfig, lobbies, defaultTestUpgrader)
+		handler = handlers.LobbyHandler(defaultTestConfig, lobbies, defaultTestAcceptOptions)
 		path    = "/lobby/" + lobby.ID()
 	)
 
@@ -202,7 +199,7 @@ func TestLobbyBanner(t *testing.T) {
 func TestLobbyRegister(t *testing.T) {
 	var (
 		lobbies, lobby = mustRegisterLobby(t, defaultTestLobbyOptions)
-		handler        = handlers.LobbyHandler(defaultTestConfig, lobbies, defaultTestUpgrader)
+		handler        = handlers.LobbyHandler(defaultTestConfig, lobbies, defaultTestAcceptOptions)
 		path           = "/lobby/" + lobby.ID()
 	)
 
@@ -266,7 +263,7 @@ func TestLobbyTimeout(t *testing.T) {
 func TestLobbyPlayerList(t *testing.T) {
 	var (
 		lobbies, lobby = mustRegisterLobby(t, defaultTestLobbyOptions)
-		handler        = handlers.LobbyHandler(defaultTestConfig, lobbies, defaultTestUpgrader)
+		handler        = handlers.LobbyHandler(defaultTestConfig, lobbies, defaultTestAcceptOptions)
 		path           = "/lobby/" + lobby.ID()
 	)
 
@@ -321,7 +318,7 @@ func TestLobbyMaxPlayers(t *testing.T) {
 	cfg := defaultTestConfig
 	cfg.Lobby.MaxPlayers = maxPlayers
 
-	handler := handlers.LobbyHandler(cfg, lobbies, defaultTestUpgrader)
+	handler := handlers.LobbyHandler(cfg, lobbies, defaultTestAcceptOptions)
 	path := "/lobby/" + lobby.ID()
 	s, cli, _ := mustCreateAndDialTestServer(t, "GET /lobby/{id}", handler, path)
 
@@ -332,9 +329,9 @@ func TestLobbyMaxPlayers(t *testing.T) {
 
 	// Make sure no players can join and be upgraded to websocket.
 	url := "ws" + strings.TrimPrefix(s.URL, "http") + path
-	conn, res, err := websocket.DefaultDialer.Dial(url, nil)
-	if conn != nil {
-		conn.Close()
+	cli, res, err := client.Dial(context.Background(), url, nil)
+	if cli != nil {
+		cli.Close()
 	}
 	if err == nil {
 		t.Errorf("Player was able to join a full lobby, response %+v", res)
@@ -344,7 +341,7 @@ func TestLobbyMaxPlayers(t *testing.T) {
 func TestLobbyOwnerElection(t *testing.T) {
 	var (
 		lobbies, lobby = mustRegisterLobby(t, defaultTestLobbyOptions)
-		handler        = handlers.LobbyHandler(defaultTestConfig, lobbies, defaultTestUpgrader)
+		handler        = handlers.LobbyHandler(defaultTestConfig, lobbies, defaultTestAcceptOptions)
 		path           = "/lobby/" + lobby.ID()
 	)
 
@@ -381,7 +378,7 @@ func TestLobbyOwnerElection(t *testing.T) {
 func TestLobbyKick(t *testing.T) {
 	var (
 		lobbies, lobby = mustRegisterLobby(t, defaultTestLobbyOptions)
-		handler        = handlers.LobbyHandler(defaultTestConfig, lobbies, defaultTestUpgrader)
+		handler        = handlers.LobbyHandler(defaultTestConfig, lobbies, defaultTestAcceptOptions)
 		path           = "/lobby/" + lobby.ID()
 	)
 
@@ -422,7 +419,7 @@ func TestLobbyKick(t *testing.T) {
 func TestLobbyConfigure(t *testing.T) {
 	var (
 		lobbies, lobby = mustRegisterLobby(t, defaultTestLobbyOptions)
-		handler        = handlers.LobbyHandler(defaultTestConfig, lobbies, defaultTestUpgrader)
+		handler        = handlers.LobbyHandler(defaultTestConfig, lobbies, defaultTestAcceptOptions)
 		path           = "/lobby/" + lobby.ID()
 	)
 

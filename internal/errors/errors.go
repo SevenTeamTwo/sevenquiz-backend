@@ -1,12 +1,14 @@
 package errors
 
 import (
+	"context"
 	"encoding/json"
 	"log"
 	"net/http"
 	"sevenquiz-backend/api"
 
-	"sevenquiz-backend/internal/websocket"
+	"github.com/coder/websocket"
+	"github.com/coder/websocket/wsjson"
 )
 
 const (
@@ -33,18 +35,18 @@ func HTTPErrorResponse(w http.ResponseWriter, statusCode int, err error, apiErr 
 	}
 }
 
-func WebsocketErrorResponse(conn *websocket.Conn, err error, apiErr api.ErrorData) {
+func WebsocketErrorResponse(ctx context.Context, conn *websocket.Conn, err error, apiErr api.ErrorData) {
 	if conn == nil {
 		return
 	}
 	if err != nil {
 		log.Println(err)
 	}
-	res := api.Response{
+	res := &api.Response{
 		Type: api.ResponseTypeError,
 		Data: apiErr,
 	}
-	if err := conn.WriteJSON(res); err != nil {
+	if err := wsjson.Write(ctx, conn, res); err != nil {
 		log.Println(err)
 	}
 }

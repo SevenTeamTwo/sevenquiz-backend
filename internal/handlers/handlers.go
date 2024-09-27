@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io/fs"
@@ -10,11 +11,11 @@ import (
 	"sevenquiz-backend/internal/config"
 	apierrs "sevenquiz-backend/internal/errors"
 	"sevenquiz-backend/internal/quiz"
-	"sevenquiz-backend/internal/websocket"
 	"time"
 	"unicode/utf8"
 
-	gws "github.com/gorilla/websocket"
+	"github.com/coder/websocket"
+	"github.com/coder/websocket/wsjson"
 )
 
 // CreateLobbyHandler returns a handler capable of creating new lobbies
@@ -74,7 +75,7 @@ func LobbyToAPIResponse(lobby *quiz.Lobby) (api.LobbyData, error) {
 
 // LobbyHandler returns a new lobby handler and will run a complete
 // quiz game upon it's completion.
-func LobbyHandler(cfg config.Config, lobbies *quiz.Lobbies, upgrader gws.Upgrader) http.HandlerFunc {
+func LobbyHandler(cfg config.Config, lobbies *quiz.Lobbies, acceptOpts websocket.AcceptOptions) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		id := r.PathValue("id")
 		if id == "" {
@@ -89,7 +90,7 @@ func LobbyHandler(cfg config.Config, lobbies *quiz.Lobbies, upgrader gws.Upgrade
 		}
 
 		state := lobby.State()
-		if state == quiz.LobbyStateRegister && lobby.IsFull() { // Add delta of 1 to consider current conn.
+		if state == quiz.LobbyStateRegister && lobby.IsFull() {
 			apierrs.HTTPErrorResponse(w, http.StatusForbidden, nil, apierrs.TooManyPlayersError(lobby.MaxPlayers()))
 			return
 		}
@@ -98,25 +99,48 @@ func LobbyHandler(cfg config.Config, lobbies *quiz.Lobbies, upgrader gws.Upgrade
 			lobby.SetState(quiz.LobbyStateRegister)
 		}
 
-		conn, err := upgrader.Upgrade(w, r, nil)
+		conn, err := websocket.Accept(w, r, &acceptOpts)
 		if err != nil {
-			// Upgrade already writes a status code and error message.
+			// Accept already writes a status code and error message.
 			log.Println(err)
 			return
 		}
+		conn.SetReadLimit(cfg.Lobby.WebsocketReadLimit)
 
-		wsConn := websocket.NewConn(conn)
-		defer handleDisconnect(lobbies, lobby, wsConn)
+		ctx := r.Context()
+		go ping(ctx, conn, 5*time.Second) // Detect timed out connection.
+		defer handleDisconnect(ctx, lobbies, lobby, conn)
 
 		switch lobby.State() {
 		case quiz.LobbyStateCreated, quiz.LobbyStateRegister:
-			handleRegister(lobby, wsConn)
+			handleRegister(ctx, lobby, conn)
 		}
 	}
 }
 
-func handleDisconnect(lobbies *quiz.Lobbies, lobby *quiz.Lobby, conn *websocket.Conn) {
-	conn.Close()
+func ping(ctx context.Context, conn *websocket.Conn, interval time.Duration) {
+	for {
+		select {
+		case <-time.Tick(interval):
+			if conn == nil {
+				return
+			}
+			timeoutCtx, cancel := context.WithTimeout(ctx, time.Second*10)
+			if err := conn.Ping(timeoutCtx); err != nil {
+				log.Println("ping failed, closing conn")
+				conn.CloseNow()
+				cancel()
+				return
+			}
+			cancel()
+		case <-ctx.Done():
+			return
+		}
+	}
+}
+
+func handleDisconnect(ctx context.Context, lobbies *quiz.Lobbies, lobby *quiz.Lobby, conn *websocket.Conn) {
+	conn.CloseNow()
 
 	switch lobby.State() {
 	/*
@@ -138,8 +162,11 @@ func handleDisconnect(lobbies *quiz.Lobbies, lobby *quiz.Lobby, conn *websocket.
 			return
 		}
 
+		timeoutCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		defer cancel()
+
 		username := cli.Username()
-		if err := lobby.BroadcastPlayerUpdate(username, "disconnect"); err != nil {
+		if err := lobby.BroadcastPlayerUpdate(timeoutCtx, username, "disconnect"); err != nil {
 			log.Println(err)
 		}
 
@@ -159,7 +186,7 @@ func handleDisconnect(lobbies *quiz.Lobbies, lobby *quiz.Lobby, conn *websocket.
 		newOwner := players[0]
 		lobby.SetOwner(newOwner)
 
-		if err := lobby.BroadcastPlayerUpdate(newOwner, "new owner"); err != nil {
+		if err := lobby.BroadcastPlayerUpdate(timeoutCtx, newOwner, "new owner"); err != nil {
 			log.Println(err)
 		}
 	default:
@@ -168,146 +195,158 @@ func handleDisconnect(lobbies *quiz.Lobbies, lobby *quiz.Lobby, conn *websocket.
 	}
 }
 
-func handleRegister(lobby *quiz.Lobby, conn *websocket.Conn) {
+func handleRegister(ctx context.Context, lobby *quiz.Lobby, conn *websocket.Conn) {
 	lobby.AddConn(conn)
 
 	// Send banner on websocket upgrade with lobby details.
-	handleLobbyRequest(lobby, conn)
+	timeoutCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	handleLobbyRequest(timeoutCtx, lobby, conn)
+	cancel()
 
 	for {
-		req := api.Request{}
-		if err := conn.ReadJSON(&req); err != nil { // Blocks until next request
-			apierrs.WebsocketErrorResponse(conn, err, apierrs.InvalidRequestError("bad json"))
+		req := &api.Request{}
+		err := wsjson.Read(ctx, conn, &req)
+		if err != nil {
+			if websocket.CloseStatus(err) == -1 { // -1 is considered as an err unrelated to closing.
+				timeoutCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+				defer cancel()
+				apierrs.WebsocketErrorResponse(timeoutCtx, conn, err, apierrs.InvalidRequestError("could not read websocket frame"))
+			} else {
+				log.Println(err)
+			}
 			return
 		}
 
+		timeoutCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+
 		switch req.Type {
 		case api.RequestTypeLobby:
-			handleLobbyRequest(lobby, conn)
+			handleLobbyRequest(timeoutCtx, lobby, conn)
 		case api.RequestTypeRegister:
-			handleRegisterRequest(lobby, conn, req.Data)
+			handleRegisterRequest(timeoutCtx, lobby, conn, req.Data)
 		case api.RequestTypeKick:
-			handleKickRequest(lobby, conn, req.Data)
+			handleKickRequest(timeoutCtx, lobby, conn, req.Data)
 		case api.RequestTypeConfigure:
-			handleConfigureRequest(lobby, conn, req.Data)
+			handleConfigureRequest(timeoutCtx, lobby, conn, req.Data)
 		default:
-			apierrs.WebsocketErrorResponse(conn, nil, apierrs.InvalidRequestError("unknown request type"))
-			continue
+			apierrs.WebsocketErrorResponse(timeoutCtx, conn, nil, apierrs.InvalidRequestError("unknown request type"))
 		}
+
+		cancel()
 	} // TODO: on start, transition to next phase with handleQuiz() with other requests handlers.
 }
 
-func handleLobbyRequest(lobby *quiz.Lobby, conn *websocket.Conn) {
+func handleLobbyRequest(ctx context.Context, lobby *quiz.Lobby, conn *websocket.Conn) {
 	data, err := LobbyToAPIResponse(lobby)
 	if err != nil {
-		apierrs.WebsocketErrorResponse(conn, err, apierrs.InternalServerError())
+		apierrs.WebsocketErrorResponse(ctx, conn, err, apierrs.InternalServerError())
 		return
 	}
-	res := api.Response{
+	res := &api.Response{
 		Type: api.ResponseTypeLobby,
 		Data: data,
 	}
-	if err := conn.WriteJSON(res); err != nil {
+	if err := wsjson.Write(ctx, conn, res); err != nil {
 		log.Println(err)
 	}
 }
 
-func handleRegisterRequest(lobby *quiz.Lobby, conn *websocket.Conn, data any) {
+func handleRegisterRequest(ctx context.Context, lobby *quiz.Lobby, conn *websocket.Conn, data any) {
 	req, err := api.DecodeJSON[api.RegisterRequestData](data)
 	if err != nil {
-		apierrs.WebsocketErrorResponse(conn, err, apierrs.InvalidRequestError("invalid register request"))
+		apierrs.WebsocketErrorResponse(ctx, conn, err, apierrs.InvalidRequestError("invalid register request"))
 		return
 	}
 
 	// cancel register if user already logged in.
 	if client, ok := lobby.GetPlayerByConn(conn); ok && client != nil {
-		apierrs.WebsocketErrorResponse(conn, nil, apierrs.UserAlreadyRegisteredError())
+		apierrs.WebsocketErrorResponse(ctx, conn, nil, apierrs.UserAlreadyRegisteredError())
 		return
 	}
 
 	if err := validateUsername(req.Username); err != nil {
-		apierrs.WebsocketErrorResponse(conn, err, apierrs.InvalidUsernameError(err.Error()))
+		apierrs.WebsocketErrorResponse(ctx, conn, err, apierrs.InvalidUsernameError(err.Error()))
 		return
 	}
 
 	if _, _, exist := lobby.GetPlayer(req.Username); exist {
-		apierrs.WebsocketErrorResponse(conn, nil, apierrs.UsernameAlreadyExistsError())
+		apierrs.WebsocketErrorResponse(ctx, conn, nil, apierrs.UsernameAlreadyExistsError())
 		return
 	}
 
 	client := lobby.AddPlayerWithConn(conn, req.Username)
 
-	res := api.Response{
+	res := &api.Response{
 		Type: api.ResponseTypeRegister,
 	}
-	if err := conn.WriteJSON(res); err != nil {
+	if err := wsjson.Write(ctx, conn, res); err != nil {
 		log.Println(err)
 	}
-	if err := lobby.BroadcastPlayerUpdate(client.Username(), "join"); err != nil {
+	if err := lobby.BroadcastPlayerUpdate(ctx, client.Username(), "join"); err != nil {
 		log.Println(err)
 	}
 
 	// Grant first user to join lobby owner permission.
 	if lobby.Owner() == "" {
 		lobby.SetOwner(req.Username)
-		if err := lobby.BroadcastPlayerUpdate(req.Username, "new owner"); err != nil {
+		if err := lobby.BroadcastPlayerUpdate(ctx, req.Username, "new owner"); err != nil {
 			log.Println(err)
 		}
 	}
 }
 
-func handleKickRequest(lobby *quiz.Lobby, conn *websocket.Conn, data any) {
+func handleKickRequest(ctx context.Context, lobby *quiz.Lobby, conn *websocket.Conn, data any) {
 	req, err := api.DecodeJSON[api.KickRequestData](data)
 	if err != nil {
-		apierrs.WebsocketErrorResponse(conn, err, apierrs.InvalidRequestError("invalid kick request"))
+		apierrs.WebsocketErrorResponse(ctx, conn, err, apierrs.InvalidRequestError("invalid kick request"))
 		return
 	}
 	client, ok := lobby.GetPlayerByConn(conn)
 	if !ok || client == nil {
-		apierrs.WebsocketErrorResponse(conn, nil, apierrs.InvalidRequestError("user is not lobby owner"))
+		apierrs.WebsocketErrorResponse(ctx, conn, nil, apierrs.InvalidRequestError("user is not lobby owner"))
 		return
 	}
 	if client.Username() != lobby.Owner() {
-		apierrs.WebsocketErrorResponse(conn, nil, apierrs.InvalidRequestError("user is not lobby owner"))
+		apierrs.WebsocketErrorResponse(ctx, conn, nil, apierrs.InvalidRequestError("user is not lobby owner"))
 		return
 	}
 	if ok := lobby.DeletePlayer(req.Username); !ok {
-		apierrs.WebsocketErrorResponse(conn, nil, apierrs.InvalidRequestError("user not found"))
+		apierrs.WebsocketErrorResponse(ctx, conn, nil, apierrs.InvalidRequestError("user not found"))
 	}
-	res := api.Response{
+	res := &api.Response{
 		Type: api.ResponseTypeKick,
 	}
-	if err := conn.WriteJSON(res); err != nil {
+	if err := wsjson.Write(ctx, conn, res); err != nil {
 		log.Println(err)
 	}
-	if err := lobby.BroadcastPlayerUpdate(req.Username, "kick"); err != nil {
+	if err := lobby.BroadcastPlayerUpdate(ctx, req.Username, "kick"); err != nil {
 		log.Println(err)
 	}
 }
 
-func handleConfigureRequest(lobby *quiz.Lobby, conn *websocket.Conn, data any) {
+func handleConfigureRequest(ctx context.Context, lobby *quiz.Lobby, conn *websocket.Conn, data any) {
 	req, err := api.DecodeJSON[api.LobbyConfigureData](data)
 	if err != nil {
-		apierrs.WebsocketErrorResponse(conn, err, apierrs.InvalidRequestError("invalid configure request"))
+		apierrs.WebsocketErrorResponse(ctx, conn, err, apierrs.InvalidRequestError("invalid configure request"))
 		return
 	}
 	client, ok := lobby.GetPlayerByConn(conn)
 	if !ok || client == nil {
-		apierrs.WebsocketErrorResponse(conn, nil, apierrs.InvalidRequestError("user is not lobby owner"))
+		apierrs.WebsocketErrorResponse(ctx, conn, nil, apierrs.InvalidRequestError("user is not lobby owner"))
 		return
 	}
 	if client.Username() != lobby.Owner() {
-		apierrs.WebsocketErrorResponse(conn, nil, apierrs.InvalidRequestError("user is not lobby owner"))
+		apierrs.WebsocketErrorResponse(ctx, conn, nil, apierrs.InvalidRequestError("user is not lobby owner"))
 		return
 	}
 	if err := lobby.SetQuiz(req.Quiz); err != nil {
-		apierrs.WebsocketErrorResponse(conn, nil, apierrs.InvalidRequestError("invalid quiz selected"))
+		apierrs.WebsocketErrorResponse(ctx, conn, nil, apierrs.InvalidRequestError("invalid quiz selected"))
 		return
 	}
-	res := api.Response{
+	res := &api.Response{
 		Type: api.ResponseTypeConfigure,
 	}
-	if err := conn.WriteJSON(res); err != nil {
+	if err := wsjson.Write(ctx, conn, res); err != nil {
 		log.Println(err)
 	}
 }

@@ -4,10 +4,10 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
-	"sevenquiz-backend/internal/websocket"
 	"sync"
 	"time"
 
+	"github.com/coder/websocket"
 	"github.com/lithammer/shortuuid/v3"
 )
 

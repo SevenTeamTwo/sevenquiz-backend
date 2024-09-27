@@ -1,6 +1,7 @@
 package quiz
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -11,7 +12,9 @@ import (
 	"time"
 
 	"sevenquiz-backend/api"
-	"sevenquiz-backend/internal/websocket"
+
+	"github.com/coder/websocket"
+	"github.com/coder/websocket/wsjson"
 
 	"github.com/golang-jwt/jwt"
 	"golang.org/x/sync/errgroup"
@@ -55,7 +58,7 @@ func (l *Lobby) Close() {
 
 	for c := range l.players {
 		if c != nil {
-			c.Close()
+			c.Close(websocket.StatusNormalClosure, "lobby closes")
 		}
 	}
 
@@ -249,7 +252,7 @@ func (l *Lobby) AddConn(conn *websocket.Conn) {
 
 // Broadcast sends a JSON message to all players and websockets
 // active in the lobby.
-func (l *Lobby) Broadcast(v any) error {
+func (l *Lobby) Broadcast(ctx context.Context, v any) error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
@@ -259,7 +262,7 @@ func (l *Lobby) Broadcast(v any) error {
 			if conn == nil {
 				return nil
 			}
-			return conn.WriteJSON(v)
+			return wsjson.Write(ctx, conn, v)
 		})
 	}
 	return errs.Wait()
@@ -267,7 +270,7 @@ func (l *Lobby) Broadcast(v any) error {
 
 // BroadcastPlayerUpdate broadcast a player event to all players
 // and websockets active in the lobby.
-func (l *Lobby) BroadcastPlayerUpdate(username, action string) error {
+func (l *Lobby) BroadcastPlayerUpdate(ctx context.Context, username, action string) error {
 	res := api.Response{
 		Type: api.ResponseTypePlayerUpdate,
 		Data: api.PlayerUpdateResponseData{
@@ -275,7 +278,7 @@ func (l *Lobby) BroadcastPlayerUpdate(username, action string) error {
 			Action:   action,
 		},
 	}
-	return l.Broadcast(res)
+	return l.Broadcast(ctx, res)
 }
 
 // ReplacePlayerConn replaces a conn for the specified player and
@@ -289,7 +292,7 @@ func (l *Lobby) ReplacePlayerConn(username string, newConn *websocket.Conn) (old
 		return nil, replaced
 	}
 	if oldConn != nil {
-		oldConn.Close()
+		oldConn.CloseNow()
 	}
 
 	l.deleteConn(oldConn)
@@ -315,7 +318,7 @@ func (l *Lobby) deletePlayer(username string) bool {
 		return false
 	}
 	if conn != nil {
-		conn.Close()
+		conn.CloseNow()
 	}
 	delete(l.players, conn)
 	return true
@@ -331,7 +334,7 @@ func (l *Lobby) DeletePlayerByConn(conn *websocket.Conn) {
 
 func (l *Lobby) deleteConn(conn *websocket.Conn) {
 	if conn != nil {
-		conn.Close()
+		conn.CloseNow()
 	}
 	delete(l.players, conn)
 }

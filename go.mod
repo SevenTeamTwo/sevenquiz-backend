@@ -4,7 +4,6 @@ go 1.23.1
 
 require (
 	github.com/MadAppGang/httplog v1.3.0
-	github.com/gorilla/websocket v1.5.3
 	github.com/lithammer/shortuuid/v3 v3.0.7
 	github.com/rs/cors v1.11.1
 )
@@ -19,6 +18,7 @@ require (
 )
 
 require (
+	github.com/coder/websocket v1.8.12
 	github.com/golang-jwt/jwt v3.2.2+incompatible
 	github.com/google/go-cmp v0.6.0
 	github.com/google/uuid v1.6.0

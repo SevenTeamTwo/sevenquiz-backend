@@ -1,11 +1,16 @@
 package client
 
 import (
+	"context"
+	"net/http"
 	"sevenquiz-backend/api"
 	"time"
 
-	"github.com/gorilla/websocket"
+	"github.com/coder/websocket"
+	"github.com/coder/websocket/wsjson"
 )
+
+var defaultTimeout = 5 * time.Second
 
 type Client struct {
 	conn    *websocket.Conn
@@ -19,32 +24,35 @@ func NewClient(conn *websocket.Conn, timeout time.Duration) *Client {
 	}
 }
 
+func Dial(ctx context.Context, u string, opts *websocket.DialOptions) (*Client, *http.Response, error) {
+	conn, res, err := websocket.Dial(ctx, u, opts)
+	if err != nil {
+		return nil, nil, err
+	}
+	return &Client{
+		conn:    conn,
+		timeout: defaultTimeout,
+	}, res, nil
+}
+
 func (c *Client) Close() {
-	c.conn.Close()
+	c.conn.Close(websocket.StatusNormalClosure, "client closure")
 }
 
 func (c *Client) sendCmd(req api.Request) (api.Response, error) {
-	if c.timeout > 0 {
-		deadline := time.Now().Add(c.timeout)
-		if err := c.conn.SetWriteDeadline(deadline); err != nil {
-			return api.Response{}, err
-		}
-	}
-	if err := c.conn.WriteJSON(req); err != nil {
+	ctx, cancel := context.WithTimeout(context.Background(), c.timeout)
+	defer cancel()
+	if err := wsjson.Write(ctx, c.conn, req); err != nil {
 		return api.Response{}, err
 	}
 	return c.ReadResponse()
 }
 
 func (c *Client) ReadResponse() (api.Response, error) {
-	if c.timeout > 0 {
-		deadline := time.Now().Add(c.timeout)
-		if err := c.conn.SetReadDeadline(deadline); err != nil {
-			return api.Response{}, err
-		}
-	}
+	ctx, cancel := context.WithTimeout(context.Background(), c.timeout)
+	defer cancel()
 	res := api.Response{}
-	err := c.conn.ReadJSON(&res)
+	err := wsjson.Read(ctx, c.conn, &res)
 	return res, err
 }
 
