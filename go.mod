@@ -18,6 +18,7 @@ require (
 )
 
 require (
+	github.com/caarlos0/env/v11 v11.2.2
 	github.com/coder/websocket v1.8.12
 	github.com/golang-jwt/jwt v3.2.2+incompatible
 	github.com/google/go-cmp v0.6.0

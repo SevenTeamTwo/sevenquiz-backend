@@ -1,28 +1,22 @@
 package config
 
 import (
-	"os"
-	"strconv"
+	"reflect"
 	"time"
 
+	env "github.com/caarlos0/env/v11"
 	"github.com/joho/godotenv"
 )
 
-var (
-	defaultMaxPlayers         = 25
-	defaultLobbyTimeout       = 15 * time.Minute
-	defaultWebsocketReadLimit = int64(512)
-)
-
 type LobbyConf struct {
-	MaxPlayers         int
-	RegisterTimeout    time.Duration
-	WebsocketReadLimit int64
+	MaxPlayers         int           `env:"MAX_PLAYERS"          envDefault:"25"`
+	RegisterTimeout    time.Duration `env:"REGISTER_TIMEOUT"     envDefault:"15m"`
+	WebsocketReadLimit int64         `env:"WEBSOCKET_READ_LIMIT" envDefault:"512"`
 }
 
 type Config struct {
-	JWTSecret []byte
-	Lobby     LobbyConf
+	JWTSecret []byte    `env:"JWT_SECRET"`
+	Lobby     LobbyConf `envPrefix:"LOBBY_"`
 }
 
 func LoadConfig(path string) (Config, error) {
@@ -32,35 +26,13 @@ func LoadConfig(path string) (Config, error) {
 	if err := godotenv.Load(path); err != nil {
 		return Config{}, err
 	}
-
-	cfg := Config{
-		JWTSecret: []byte(os.Getenv("JWT_SECRET")),
-		Lobby: LobbyConf{
-			MaxPlayers:         defaultMaxPlayers,
-			RegisterTimeout:    defaultLobbyTimeout,
-			WebsocketReadLimit: defaultWebsocketReadLimit,
+	cfg := Config{}
+	err := env.ParseWithOptions(&cfg, env.Options{
+		FuncMap: map[reflect.Type]env.ParserFunc{
+			reflect.TypeOf([]byte{0}): func(v string) (interface{}, error) {
+				return []byte(v), nil
+			},
 		},
-	}
-
-	var err error
-	if maxPlayers := os.Getenv("LOBBY_MAX_PLAYERS"); maxPlayers != "" {
-		cfg.Lobby.MaxPlayers, err = strconv.Atoi(maxPlayers)
-		if err != nil {
-			return cfg, err
-		}
-	}
-	if lobbyTimeout := os.Getenv("LOBBY_REGISTER_TIMEOUT"); lobbyTimeout != "" {
-		cfg.Lobby.RegisterTimeout, err = time.ParseDuration(lobbyTimeout)
-		if err != nil {
-			return cfg, err
-		}
-	}
-	if readLimit := os.Getenv("LOBBY_WEBSOCKET_READ_LIMIT"); readLimit != "" {
-		cfg.Lobby.WebsocketReadLimit, err = strconv.ParseInt(readLimit, 10, 64)
-		if err != nil {
-			return cfg, err
-		}
-	}
-
-	return cfg, nil
+	})
+	return cfg, err
 }
