@@ -13,8 +13,8 @@ import (
 	"sevenquiz-backend/api"
 	"sevenquiz-backend/internal/client"
 	"sevenquiz-backend/internal/config"
-	apierrs "sevenquiz-backend/internal/errors"
 	"sevenquiz-backend/internal/handlers"
+	"sevenquiz-backend/internal/middlewares"
 	"sevenquiz-backend/internal/quiz"
 	"slices"
 	"strings"
@@ -53,7 +53,7 @@ var (
 	defaultTestAcceptOptions = websocket.AcceptOptions{
 		InsecureSkipVerify: true,
 	}
-	defaultTestWantLobby = api.LobbyData{
+	defaultTestWantLobby = api.LobbyResponseData{
 		MaxPlayers:  20,
 		Quizzes:     []string{"cars", "custom", "default"},
 		CurrentQuiz: "cars",
@@ -65,7 +65,7 @@ var (
 )
 
 // param named "_pattern" to avoid unparam linter FP until new pattern is tested.
-func mustCreateAndDialTestServer(t *testing.T, _pattern string, handler http.HandlerFunc, path string) (*httptest.Server, *client.Client, *http.Response) {
+func mustCreateAndDialTestServer(t *testing.T, _pattern string, handler http.Handler, path string) (*httptest.Server, *client.Client, *http.Response) {
 	t.Helper()
 
 	s := newTestServer(_pattern, handler)
@@ -78,9 +78,9 @@ func mustCreateAndDialTestServer(t *testing.T, _pattern string, handler http.Han
 	return s, cli, res
 }
 
-func newTestServer(pattern string, handler http.HandlerFunc) *httptest.Server {
+func newTestServer(pattern string, handler http.Handler) *httptest.Server {
 	mux := http.NewServeMux()
-	mux.HandleFunc(pattern, handler)
+	mux.Handle(pattern, handler)
 	return httptest.NewServer(mux)
 }
 
@@ -125,7 +125,7 @@ func TestLobbyCreate(t *testing.T) {
 		t.Fatalf("CreateLobbyHandler returned unexpected status code, got %d, want %d", got, want)
 	}
 
-	apiRes := api.CreateLobbyResponse{}
+	apiRes := api.CreateLobbyResponseData{}
 	err := json.NewDecoder(res.Body).Decode(&apiRes)
 	if err != nil {
 		t.Fatalf("Unexpected error while decoding create lobby response: %v", err)
@@ -154,11 +154,12 @@ func TestLobbyBanner(t *testing.T) {
 			MaxPlayers: 20,
 			Quizzes:    quizzesFS,
 		})
+		mw      = middlewares.NewLobby(lobbies)
 		handler = handlers.LobbyHandler(defaultTestConfig, lobbies, defaultTestAcceptOptions)
 		path    = "/lobby/" + lobby.ID()
 	)
 
-	_, cli, res := mustCreateAndDialTestServer(t, "GET /lobby/{id}", handler, path)
+	_, cli, res := mustCreateAndDialTestServer(t, "GET /lobby/{id}", middlewares.Chain(handler, mw), path)
 
 	apiRes, err := cli.ReadResponse()
 	if err != nil {
@@ -169,7 +170,7 @@ func TestLobbyBanner(t *testing.T) {
 		t.Fatalf("Could not read lobby banner: got api response: %+v", res)
 	}
 
-	data, err := api.DecodeJSON[api.LobbyData](apiRes.Data)
+	data, err := api.DecodeJSON[api.LobbyResponseData](apiRes.Data)
 	if err != nil {
 		t.Fatalf("Could not decode lobby data: %v", err)
 	}
@@ -199,11 +200,12 @@ func TestLobbyBanner(t *testing.T) {
 func TestLobbyRegister(t *testing.T) {
 	var (
 		lobbies, lobby = mustRegisterLobby(t, defaultTestLobbyOptions)
+		mw             = middlewares.NewLobby(lobbies)
 		handler        = handlers.LobbyHandler(defaultTestConfig, lobbies, defaultTestAcceptOptions)
 		path           = "/lobby/" + lobby.ID()
 	)
 
-	_, cli, _ := mustCreateAndDialTestServer(t, "GET /lobby/{id}", handler, path)
+	_, cli, _ := mustCreateAndDialTestServer(t, "GET /lobby/{id}", middlewares.Chain(handler, mw), path)
 
 	username := "testuser"
 	want := defaultTestWantLobby
@@ -226,11 +228,11 @@ func TestLobbyRegister(t *testing.T) {
 		t.Fatalf("Unexpected api response: %+v", res)
 	}
 
-	data, err := api.DecodeJSON[api.ErrorData](res.Data)
+	data, err := api.DecodeJSON[api.ErrorData[api.WebsocketErrorCode]](res.Data)
 	if err != nil {
 		t.Fatalf("Error while decoding register response: %v", err)
 	}
-	if got, want := data.Code, apierrs.UserAlreadyRegisteredCode; got != want {
+	if got, want := data.Code, api.PlayerAlreadyRegisteredCode; got != want {
 		t.Errorf("Invalid register error code, got %d, want %d", got, want)
 	}
 }
@@ -243,11 +245,11 @@ func TestLobbyTimeout(t *testing.T) {
 	)
 
 	cfg := defaultTestConfig
-	cfg.Lobby.RegisterTimeout = time.Duration(0)
+	cfg.Lobby.RegisterTimeout = time.Nanosecond
 
 	handlers.CreateLobbyHandler(cfg, lobbies, quizzesFS)(res, req)
 
-	apiRes := &api.CreateLobbyResponse{}
+	apiRes := &api.CreateLobbyResponseData{}
 	if err := json.NewDecoder(res.Body).Decode(apiRes); err != nil {
 		t.Fatalf("Could not decode create lobby response: %v", err)
 	}
@@ -263,11 +265,12 @@ func TestLobbyTimeout(t *testing.T) {
 func TestLobbyPlayerList(t *testing.T) {
 	var (
 		lobbies, lobby = mustRegisterLobby(t, defaultTestLobbyOptions)
+		mw             = middlewares.NewLobby(lobbies)
 		handler        = handlers.LobbyHandler(defaultTestConfig, lobbies, defaultTestAcceptOptions)
 		path           = "/lobby/" + lobby.ID()
 	)
 
-	s, cli, _ := mustCreateAndDialTestServer(t, "GET /lobby/{id}", handler, path)
+	s, cli, _ := mustCreateAndDialTestServer(t, "GET /lobby/{id}", middlewares.Chain(handler, mw), path)
 
 	// Setup lobby owner
 	owner := "owner"
@@ -318,9 +321,10 @@ func TestLobbyMaxPlayers(t *testing.T) {
 	cfg := defaultTestConfig
 	cfg.Lobby.MaxPlayers = maxPlayers
 
+	mw := middlewares.NewLobby(lobbies)
 	handler := handlers.LobbyHandler(cfg, lobbies, defaultTestAcceptOptions)
 	path := "/lobby/" + lobby.ID()
-	s, cli, _ := mustCreateAndDialTestServer(t, "GET /lobby/{id}", handler, path)
+	s, cli, _ := mustCreateAndDialTestServer(t, "GET /lobby/{id}", middlewares.Chain(handler, mw), path)
 
 	// Setup lobby owner
 	want := defaultTestWantLobby
@@ -341,11 +345,12 @@ func TestLobbyMaxPlayers(t *testing.T) {
 func TestLobbyOwnerElection(t *testing.T) {
 	var (
 		lobbies, lobby = mustRegisterLobby(t, defaultTestLobbyOptions)
+		mw             = middlewares.NewLobby(lobbies)
 		handler        = handlers.LobbyHandler(defaultTestConfig, lobbies, defaultTestAcceptOptions)
 		path           = "/lobby/" + lobby.ID()
 	)
 
-	s, cli, _ := mustCreateAndDialTestServer(t, "GET /lobby/{id}", handler, path)
+	s, cli, _ := mustCreateAndDialTestServer(t, "GET /lobby/{id}", middlewares.Chain(handler, mw), path)
 
 	// Setup lobby owner
 	owner := "owner"
@@ -378,11 +383,12 @@ func TestLobbyOwnerElection(t *testing.T) {
 func TestLobbyKick(t *testing.T) {
 	var (
 		lobbies, lobby = mustRegisterLobby(t, defaultTestLobbyOptions)
+		mw             = middlewares.NewLobby(lobbies)
 		handler        = handlers.LobbyHandler(defaultTestConfig, lobbies, defaultTestAcceptOptions)
 		path           = "/lobby/" + lobby.ID()
 	)
 
-	s, cli, _ := mustCreateAndDialTestServer(t, "GET /lobby/{id}", handler, path)
+	s, cli, _ := mustCreateAndDialTestServer(t, "GET /lobby/{id}", middlewares.Chain(handler, mw), path)
 
 	// Setup lobby owner
 	owner := "owner"
@@ -419,11 +425,12 @@ func TestLobbyKick(t *testing.T) {
 func TestLobbyConfigure(t *testing.T) {
 	var (
 		lobbies, lobby = mustRegisterLobby(t, defaultTestLobbyOptions)
+		mw             = middlewares.NewLobby(lobbies)
 		handler        = handlers.LobbyHandler(defaultTestConfig, lobbies, defaultTestAcceptOptions)
 		path           = "/lobby/" + lobby.ID()
 	)
 
-	_, cli, _ := mustCreateAndDialTestServer(t, "GET /lobby/{id}", handler, path)
+	_, cli, _ := mustCreateAndDialTestServer(t, "GET /lobby/{id}", middlewares.Chain(handler, mw), path)
 
 	// Setup lobby owner
 	owner := "owner"
@@ -456,36 +463,38 @@ func mustRegisterLobby(t *testing.T, opts quiz.LobbyOptions) (*quiz.Lobbies, *qu
 	return lobbies, lobby
 }
 
-func mustLobby(t *testing.T, cli *client.Client, want api.LobbyData) {
+func mustLobby(t *testing.T, cli *client.Client, want api.LobbyResponseData) {
 	t.Helper()
 
 	res, err := cli.Lobby()
 	if err != nil {
 		t.Fatalf("Error while sending lobby command: %v", err)
 	}
+	if res.Type != api.ResponseTypeLobby {
+		t.Fatalf("Could not read lobby response: got api response: %+v", res)
+	}
 
 	mustDecodeLobbyData(t, res, want)
 }
 
-func mustLobbyBanner(t *testing.T, cli *client.Client, want api.LobbyData) {
+func mustLobbyBanner(t *testing.T, cli *client.Client, want api.LobbyResponseData) {
 	t.Helper()
 
 	res, err := cli.ReadResponse()
 	if err != nil {
 		t.Fatalf("Could not read lobby banner: %v", err)
 	}
-
-	mustDecodeLobbyData(t, res, want)
-}
-
-func mustDecodeLobbyData(t *testing.T, res api.Response, want api.LobbyData) {
-	t.Helper()
-
 	if res.Type != api.ResponseTypeLobby {
 		t.Fatalf("Could not read lobby banner: got api response: %+v", res)
 	}
 
-	data, err := api.DecodeJSON[api.LobbyData](res.Data)
+	mustDecodeLobbyData(t, res, want)
+}
+
+func mustDecodeLobbyData(t *testing.T, res api.Response[json.RawMessage], want api.LobbyResponseData) {
+	t.Helper()
+
+	data, err := api.DecodeJSON[api.LobbyResponseData](res.Data)
 	if err != nil {
 		t.Fatalf("Could not decode lobby data: %v", data)
 	}
@@ -509,7 +518,7 @@ func mustDecodeLobbyData(t *testing.T, res api.Response, want api.LobbyData) {
 	}
 }
 
-func mustRegisterPlayer(t *testing.T, cli *client.Client, wantLobby *api.LobbyData, username string) {
+func mustRegisterPlayer(t *testing.T, cli *client.Client, wantLobby *api.LobbyResponseData, username string) {
 	t.Helper()
 
 	mustLobbyBanner(t, cli, *wantLobby)
@@ -519,7 +528,7 @@ func mustRegisterPlayer(t *testing.T, cli *client.Client, wantLobby *api.LobbyDa
 	wantLobby.PlayerList = append(wantLobby.PlayerList, username)
 }
 
-func mustRegisterOwner(t *testing.T, cli *client.Client, wantLobby *api.LobbyData, username string) {
+func mustRegisterOwner(t *testing.T, cli *client.Client, wantLobby *api.LobbyResponseData, username string) {
 	t.Helper()
 
 	mustRegisterPlayer(t, cli, wantLobby, username)
@@ -574,7 +583,7 @@ func mustBroadcastConfigure(t *testing.T, cli *client.Client, quiz string) {
 		t.Fatalf("Could not read configure broadcast: got api response: %+v", res)
 	}
 
-	data, err := api.DecodeJSON[api.LobbyConfigureData](res.Data)
+	data, err := api.DecodeJSON[api.LobbyConfigureResponseData](res.Data)
 	if err != nil {
 		t.Fatalf("Could not decode configure broadcast data: %v", data)
 	}

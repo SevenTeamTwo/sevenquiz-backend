@@ -26,9 +26,24 @@ const (
 	LobbyStateCreated LobbyState = iota
 	LobbyStateRegister
 	LobbyStateQuiz
-	LobbyStateResponses
+	LobbyStateAnswers
 	LobbyStateEnded
 )
+
+var lobbyStateToString = map[LobbyState]string{
+	LobbyStateCreated:  "created",
+	LobbyStateRegister: "register",
+	LobbyStateQuiz:     "quiz",
+	LobbyStateAnswers:  "answers",
+	LobbyStateEnded:    "ended",
+}
+
+func (ls LobbyState) String() string {
+	if s, ok := lobbyStateToString[ls]; ok {
+		return s
+	}
+	return "unknown"
+}
 
 // Lobby represents a player lobby identified by their associated websocket.
 //
@@ -271,7 +286,7 @@ func (l *Lobby) Broadcast(ctx context.Context, v any) error {
 // BroadcastPlayerUpdate broadcast a player event to all players
 // and websockets active in the lobby.
 func (l *Lobby) BroadcastPlayerUpdate(ctx context.Context, username, action string) error {
-	res := api.Response{
+	res := api.Response[api.PlayerUpdateResponseData]{
 		Type: api.ResponseTypePlayerUpdate,
 		Data: api.PlayerUpdateResponseData{
 			Username: username,
@@ -282,9 +297,9 @@ func (l *Lobby) BroadcastPlayerUpdate(ctx context.Context, username, action stri
 }
 
 func (l *Lobby) BroadcastConfigure(ctx context.Context, quiz string) error {
-	res := api.Response{
+	res := api.Response[api.LobbyConfigureResponseData]{
 		Type: api.ResponseTypeConfigure,
-		Data: api.LobbyConfigureData{
+		Data: api.LobbyConfigureResponseData{
 			Quiz: quiz,
 		},
 	}

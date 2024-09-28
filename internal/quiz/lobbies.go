@@ -21,25 +21,34 @@ var errNoLobbySlotAvailable = errors.New("no lobby slot available")
 
 type LobbyOptions struct {
 	// Owner represents the lobby's owner.
-	// This priviledged user has the rights to start a lobby
-	// and credit points at the end of the quiz.
+	//
+	// This priviledged user has the rights to start a lobby and credit
+	// points at the end of the quiz.
+	//
 	// Empty value will grant the first user to register owner privileges.
 	Owner string
 
-	// MaxPlayers defines the maximum amount of players
-	// allowed to join a lobby. This limit is reached even
-	// with a lobby filled with unregistered users.
+	// MaxPlayers defines the maximum amount of players allowed to join a lobby.
+	// This limit is reached even with a lobby filled with unregistered users.
+	//
 	// Default is set to 25. Negative value means no limit.
 	MaxPlayers int
 
-	// Quizzes registers an embed filesystem holding all quizzes
-	// questions and assets.
+	// Quizzes registers an embed filesystem holding all quizzes questions and assets.
+	// All quizzes folders must be at filesystem's root directory.
 	Quizzes fs.FS
 
-	// JWTSalt is an optional salt to be used while generating the
-	// lobby's jwt key. It helps making the key more unique otherwise
-	// only a combination of the ID and timestamp is used.
+	// JWTSalt is an optional salt to be used while generating the lobby's jwt key.
+	//
+	// It helps making the key more unique otherwise only a combination of
+	// the ID and timestamp is used.
 	JWTSalt []byte
+
+	// Timeout sets a duration before a lobby expires.
+	// A lobby expires if his state is still Created or Registered after timeout.
+	//
+	// Default is 15 minutes. Set a negative value to disable it.
+	Timeout time.Duration
 }
 
 // Register tries to register a new lobby and returns an error
@@ -47,6 +56,9 @@ type LobbyOptions struct {
 func (l *Lobbies) Register(opts LobbyOptions) (*Lobby, error) {
 	if opts.MaxPlayers == 0 {
 		opts.MaxPlayers = 25
+	}
+	if opts.Timeout == 0 {
+		opts.Timeout = 15 * time.Minute
 	}
 
 	id := newLobbyID()
@@ -96,7 +108,22 @@ func (l *Lobbies) Register(opts LobbyOptions) (*Lobby, error) {
 
 	l.lobbies[lobby.id] = lobby
 
+	go l.lobbyTimeout(lobby, opts.Timeout)
+
 	return lobby, nil
+}
+
+func (l *Lobbies) lobbyTimeout(lobby *Lobby, timeout time.Duration) {
+	select {
+	case <-lobby.Done():
+		return
+	case <-time.After(timeout):
+		switch lobby.State() {
+		case LobbyStateCreated, LobbyStateRegister:
+			// TODO: broadcast to conns before ?
+			l.Delete(lobby.ID())
+		}
+	}
 }
 
 func newLobbyID() string {

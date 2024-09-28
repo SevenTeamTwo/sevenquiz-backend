@@ -27,7 +27,6 @@ linters:
     - gocheckcompilerdirectives
     - gochecksumtype
     - gocognit
-    - goconst
     - gocritic
     - gocyclo
     - godot

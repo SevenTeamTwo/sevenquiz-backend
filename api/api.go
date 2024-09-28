@@ -1,78 +1,107 @@
 package api
 
-import "encoding/json"
-
-const (
-	ResponseTypeError        = "error"
-	ResponseTypeRegister     = "register"
-	ResponseTypeLobby        = "lobby"
-	ResponseTypeKick         = "kick"
-	ResponseTypePlayerUpdate = "playerUpdate"
-	ResponseTypeConfigure    = "configure"
+import (
+	"encoding/json"
 )
 
-type Response struct {
-	Type    string `json:"type"`
-	Message string `json:"message,omitempty"`
-	Data    any    `json:"data,omitempty"`
+type Response[T ResponseData] struct {
+	Type    ResponseType `json:"type"`
+	Message string       `json:"message,omitempty"`
+	Data    T            `json:"data,omitempty"`
 }
+
+type ResponseType string
 
 const (
-	RequestTypeError     = "error"
-	RequestTypeRegister  = "register"
-	RequestTypeLobby     = "lobby"
-	RequestTypeKick      = "kick"
-	RequestTypeConfigure = "configure"
+	ResponseTypeError        ResponseType = "error"
+	ResponseTypeRegister     ResponseType = "register"
+	ResponseTypeLobby        ResponseType = "lobby"
+	ResponseTypeKick         ResponseType = "kick"
+	ResponseTypePlayerUpdate ResponseType = "playerUpdate"
+	ResponseTypeConfigure    ResponseType = "configure"
 )
 
-type Request struct {
-	Type string `json:"type"`
-	Data any    `json:"data,omitempty"`
+func (r ResponseType) String() string {
+	return string(r)
 }
 
-type ErrorData struct {
-	Code    int    `json:"code"`
-	Message string `json:"message,omitempty"`
-	Extra   any    `json:"extra,omitempty"`
+type Request[T RequestData] struct {
+	Type RequestType `json:"type"`
+	Data T           `json:"data,omitempty"`
 }
 
-type LobbyData struct {
-	ID          string   `json:"id"`
-	Owner       *string  `json:"owner"`
-	MaxPlayers  int      `json:"maxPlayers"`
-	PlayerList  []string `json:"playerList"`
-	Quizzes     []string `json:"quizzes"`
-	CurrentQuiz string   `json:"currentQuiz"`
-	Created     string   `json:"created"`
+type RequestType string
+
+const (
+	RequestTypeRegister  RequestType = "register"
+	RequestTypeLobby     RequestType = "lobby"
+	RequestTypeKick      RequestType = "kick"
+	RequestTypeConfigure RequestType = "configure"
+	RequestTypeUnknown   RequestType = "unknown"
+)
+
+func (r RequestType) String() string {
+	return string(r)
 }
 
-type LobbyConfigureData struct {
-	Quiz string `json:"quiz"`
+type RequestData interface {
+	LobbyConfigureRequestData |
+		RegisterRequestData |
+		KickRequestData |
+		EmptyRequestData | json.RawMessage
 }
 
-type CreateLobbyResponse struct {
-	LobbyID string `json:"id"`
+type ResponseData interface {
+	LobbyResponseData |
+		CreateLobbyResponseData |
+		PlayerUpdateResponseData |
+		LobbyConfigureResponseData |
+		HTTPErrorData | WebsocketErrorData |
+		EmptyResponseData | json.RawMessage
 }
 
-type RegisterRequestData struct {
-	Username string `json:"username"`
-}
+type (
+	EmptyRequestData  *struct{}
+	EmptyResponseData *struct{}
 
-type KickRequestData struct {
-	Username string `json:"username"`
-}
-
-type PlayerUpdateResponseData struct {
-	Username string `json:"username,omitempty"`
-	Action   string `json:"action"`
-}
-
-func DecodeJSON[T any](data any) (res T, err error) {
-	b, err := json.Marshal(data)
-	if err != nil {
-		return res, err
+	LobbyResponseData struct {
+		ID          string   `json:"id"`
+		Owner       *string  `json:"owner"`
+		MaxPlayers  int      `json:"maxPlayers"`
+		PlayerList  []string `json:"playerList"`
+		Quizzes     []string `json:"quizzes"`
+		CurrentQuiz string   `json:"currentQuiz"`
+		Created     string   `json:"created"`
 	}
-	if err := json.Unmarshal(b, &res); err != nil {
+
+	LobbyConfigureRequestData struct {
+		Quiz string `json:"quiz"`
+	}
+
+	LobbyConfigureResponseData struct {
+		Quiz string `json:"quiz"`
+	}
+
+	CreateLobbyResponseData struct {
+		LobbyID string `json:"id"`
+	}
+
+	RegisterRequestData struct {
+		Username string `json:"username"`
+	}
+
+	KickRequestData struct {
+		Username string `json:"username"`
+	}
+
+	PlayerUpdateResponseData struct {
+		Username string `json:"username,omitempty"`
+		Action   string `json:"action"`
+	}
+)
+
+func DecodeJSON[T any](data json.RawMessage) (res T, err error) {
+	if err := json.Unmarshal(data, &res); err != nil {
 		return res, err
 	}
 	return res, nil

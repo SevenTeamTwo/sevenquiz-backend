@@ -2,6 +2,7 @@ package client
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"sevenquiz-backend/api"
 	"time"
@@ -39,56 +40,56 @@ func (c *Client) Close() {
 	c.conn.Close(websocket.StatusNormalClosure, "client closure")
 }
 
-func (c *Client) sendCmd(req api.Request) (api.Response, error) {
+func sendCmd[T any](c *Client, req T) (api.Response[json.RawMessage], error) {
 	ctx, cancel := context.WithTimeout(context.Background(), c.timeout)
 	defer cancel()
 	if err := wsjson.Write(ctx, c.conn, req); err != nil {
-		return api.Response{}, err
+		return api.Response[json.RawMessage]{}, err
 	}
 	return c.ReadResponse()
 }
 
-func (c *Client) ReadResponse() (api.Response, error) {
+func (c *Client) ReadResponse() (api.Response[json.RawMessage], error) {
 	ctx, cancel := context.WithTimeout(context.Background(), c.timeout)
 	defer cancel()
-	res := api.Response{}
+	res := api.Response[json.RawMessage]{}
 	err := wsjson.Read(ctx, c.conn, &res)
 	return res, err
 }
 
-func (c *Client) Lobby() (api.Response, error) {
-	req := api.Request{
+func (c *Client) Lobby() (api.Response[json.RawMessage], error) {
+	req := api.Request[api.EmptyRequestData]{
 		Type: api.RequestTypeLobby,
 	}
-	return c.sendCmd(req)
+	return sendCmd(c, req)
 }
 
-func (c *Client) Register(username string) (api.Response, error) {
-	req := api.Request{
+func (c *Client) Register(username string) (api.Response[json.RawMessage], error) {
+	req := api.Request[api.RegisterRequestData]{
 		Type: api.RequestTypeRegister,
 		Data: api.RegisterRequestData{
 			Username: username,
 		},
 	}
-	return c.sendCmd(req)
+	return sendCmd(c, req)
 }
 
-func (c *Client) Kick(username string) (api.Response, error) {
-	req := api.Request{
+func (c *Client) Kick(username string) (api.Response[json.RawMessage], error) {
+	req := api.Request[api.KickRequestData]{
 		Type: api.RequestTypeKick,
 		Data: api.KickRequestData{
 			Username: username,
 		},
 	}
-	return c.sendCmd(req)
+	return sendCmd(c, req)
 }
 
-func (c *Client) Configure(quiz string) (api.Response, error) {
-	req := api.Request{
+func (c *Client) Configure(quiz string) (api.Response[json.RawMessage], error) {
+	req := api.Request[api.LobbyConfigureRequestData]{
 		Type: api.RequestTypeConfigure,
-		Data: api.LobbyConfigureData{
+		Data: api.LobbyConfigureRequestData{
 			Quiz: quiz,
 		},
 	}
-	return c.sendCmd(req)
+	return sendCmd(c, req)
 }

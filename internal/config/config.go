@@ -15,8 +15,13 @@ type LobbyConf struct {
 	WebsocketReadLimit int64         `env:"WEBSOCKET_READ_LIMIT" envDefault:"512"`
 }
 
+type CORSConf struct {
+	AllowedOrigins []string `env:"ALLOWED_ORIGINS" envDefault:"*"`
+}
+
 type Config struct {
 	JWTSecret []byte    `env:"JWT_SECRET"`
+	CORS      CORSConf  `envPrefix:"CORS_"`
 	Lobby     LobbyConf `envPrefix:"LOBBY_"`
 }
 
