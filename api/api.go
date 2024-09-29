@@ -55,7 +55,7 @@ type ResponseData interface {
 	LobbyResponseData |
 		CreateLobbyResponseData |
 		PlayerUpdateResponseData |
-		LobbyConfigureResponseData |
+		LobbyUpdateResponseData |
 		HTTPErrorData | WebsocketErrorData |
 		EmptyResponseData | json.RawMessage
 }
@@ -75,10 +75,11 @@ type (
 	}
 
 	LobbyConfigureRequestData struct {
-		Quiz string `json:"quiz"`
+		Quiz     string `json:"quiz"`
+		Password string `json:"password"`
 	}
 
-	LobbyConfigureResponseData struct {
+	LobbyUpdateResponseData struct {
 		Quiz string `json:"quiz"`
 	}
 

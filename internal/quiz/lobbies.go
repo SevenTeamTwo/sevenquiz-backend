@@ -11,10 +11,16 @@ import (
 	"github.com/lithammer/shortuuid/v3"
 )
 
-// Lobbies acts as an in-memory container for the quiz lobbies.
-type Lobbies struct {
+type lobbies struct {
 	lobbies map[string]*Lobby
 	mu      sync.Mutex
+}
+
+// NewLobbiesCache returns an in-memory storage of quiz lobbies.
+func NewLobbiesCache() LobbyRepository {
+	return &lobbies{
+		lobbies: map[string]*Lobby{},
+	}
 }
 
 var errNoLobbySlotAvailable = errors.New("no lobby slot available")
@@ -49,11 +55,20 @@ type LobbyOptions struct {
 	//
 	// Default is 15 minutes. Set a negative value to disable it.
 	Timeout time.Duration
+
+	// Password sets a lobby password to be check with lobby.CheckPassword().
+	Password string
+}
+
+type LobbyRepository interface {
+	Register(opts LobbyOptions) (*Lobby, error)
+	Get(id string) (*Lobby, bool)
+	Delete(id string)
 }
 
 // Register tries to register a new lobby and returns an error
 // if no slots are available.
-func (l *Lobbies) Register(opts LobbyOptions) (*Lobby, error) {
+func (l *lobbies) Register(opts LobbyOptions) (*Lobby, error) {
 	if opts.MaxPlayers == 0 {
 		opts.MaxPlayers = 25
 	}
@@ -69,6 +84,7 @@ func (l *Lobbies) Register(opts LobbyOptions) (*Lobby, error) {
 		owner:      opts.Owner,
 		maxPlayers: opts.MaxPlayers,
 		quizzes:    opts.Quizzes,
+		password:   opts.Password,
 		jwtKey:     newLobbyTokenKey(opts.JWTSalt, id, created),
 		players:    map[*websocket.Conn]*LobbyPlayer{},
 		created:    created,
@@ -113,7 +129,7 @@ func (l *Lobbies) Register(opts LobbyOptions) (*Lobby, error) {
 	return lobby, nil
 }
 
-func (l *Lobbies) lobbyTimeout(lobby *Lobby, timeout time.Duration) {
+func (l *lobbies) lobbyTimeout(lobby *Lobby, timeout time.Duration) {
 	select {
 	case <-lobby.Done():
 		return
@@ -139,7 +155,7 @@ func newLobbyTokenKey(secret []byte, id string, created time.Time) []byte {
 }
 
 // Get retrieves a lobby by unique id.
-func (l *Lobbies) Get(id string) (*Lobby, bool) {
+func (l *lobbies) Get(id string) (*Lobby, bool) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	lobby, ok := l.lobbies[id]
@@ -147,7 +163,7 @@ func (l *Lobbies) Get(id string) (*Lobby, bool) {
 }
 
 // Delete closes all lobby conns before deleting it.
-func (l *Lobbies) Delete(id string) {
+func (l *lobbies) Delete(id string) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 

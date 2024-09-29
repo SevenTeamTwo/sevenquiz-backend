@@ -12,7 +12,7 @@ import (
 
 	"sevenquiz-backend/internal/config"
 	"sevenquiz-backend/internal/handlers"
-	"sevenquiz-backend/internal/middlewares"
+	mws "sevenquiz-backend/internal/middlewares"
 	"sevenquiz-backend/internal/quiz"
 
 	"github.com/coder/websocket"
@@ -27,10 +27,10 @@ func init() {
 	logger := slog.New(handlers.ContextHandler{
 		Handler: slog.NewJSONHandler(os.Stdout, nil),
 		Keys: []any{
-			middlewares.LobbyIDKey,
-			middlewares.LobbyStateKey,
-			middlewares.LobbyUsernameKey,
-			middlewares.LobbyRequestKey,
+			mws.LobbyIDKey,
+			mws.LobbyStateKey,
+			mws.LobbyUsernameKey,
+			mws.LobbyRequestKey,
 		},
 	})
 	slog.SetDefault(logger)
@@ -47,7 +47,7 @@ func main() {
 	}
 
 	var (
-		lobbies    = &quiz.Lobbies{}
+		lobbies    = quiz.NewLobbiesCache()
 		acceptOpts = websocket.AcceptOptions{
 			OriginPatterns: cfg.CORS.AllowedOrigins,
 		}
@@ -55,21 +55,21 @@ func main() {
 			AllowedOrigins: cfg.CORS.AllowedOrigins,
 		}
 
-		defaultMws = []middlewares.Middleware{
+		defaultMws = []mws.Middleware{
 			cors.New(corsOpts).Handler,
 			sloghttp.NewWithConfig(slog.Default(), sloghttp.Config{
 				WithUserAgent: true,
 				WithRequestID: true,
 			}),
 		}
-		lobbyMws = append(defaultMws, middlewares.NewLobby(lobbies))
+		lobbyMws = append(defaultMws, mws.Subprotocols, mws.NewLobby(lobbies))
 
 		createLobbyHandler = handlers.CreateLobbyHandler(cfg, lobbies, quizzesFS)
 		lobbyHandler       = handlers.LobbyHandler(cfg, lobbies, acceptOpts)
 	)
 
-	http.Handle("POST /lobby", middlewares.Chain(createLobbyHandler, defaultMws...))
-	http.Handle("GET /lobby/{id}", middlewares.Chain(lobbyHandler, lobbyMws...))
+	http.Handle("POST /lobby", mws.Chain(createLobbyHandler, defaultMws...))
+	http.Handle("GET /lobby/{id}", mws.Chain(lobbyHandler, lobbyMws...))
 
 	srv := http.Server{
 		Addr:         ":8080",

@@ -13,6 +13,7 @@ const (
 	InternalServerErrorHTTPCode HTTPErrorCode = 102
 	InvalidTokenErrorHTTPCode   HTTPErrorCode = 103
 	InvalidTokenClaimHTTPCode   HTTPErrorCode = 104
+	UnauthorizedErrorHTTPCode   HTTPErrorCode = 105
 )
 
 type WebsocketErrorData struct {

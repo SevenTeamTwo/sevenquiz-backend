@@ -13,7 +13,7 @@ import (
 var quizzes embed.FS
 
 func TestListQuizzes(t *testing.T) {
-	lobbies := &quiz.Lobbies{}
+	lobbies := quiz.NewLobbiesCache()
 	quizzesFS, err := fs.Sub(quizzes, "tests/quizzes")
 	if err != nil {
 		t.Fatalf("Could not subtree the embed test quizzes FS: %v", err)

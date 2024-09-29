@@ -14,7 +14,7 @@ import (
 	"sevenquiz-backend/internal/client"
 	"sevenquiz-backend/internal/config"
 	"sevenquiz-backend/internal/handlers"
-	"sevenquiz-backend/internal/middlewares"
+	mws "sevenquiz-backend/internal/middlewares"
 	"sevenquiz-backend/internal/quiz"
 	"slices"
 	"strings"
@@ -102,7 +102,7 @@ func mustDialTestServer(t *testing.T, s *httptest.Server, path string) (*client.
 
 func TestLobbyCreate(t *testing.T) {
 	var (
-		lobbies = &quiz.Lobbies{}
+		lobbies = quiz.NewLobbiesCache()
 		req     = httptest.NewRequest(http.MethodPost, "/lobby", nil)
 		res     = httptest.NewRecorder()
 	)
@@ -154,12 +154,12 @@ func TestLobbyBanner(t *testing.T) {
 			MaxPlayers: 20,
 			Quizzes:    quizzesFS,
 		})
-		mw      = middlewares.NewLobby(lobbies)
+		mw      = mws.NewLobby(lobbies)
 		handler = handlers.LobbyHandler(defaultTestConfig, lobbies, defaultTestAcceptOptions)
 		path    = "/lobby/" + lobby.ID()
 	)
 
-	_, cli, res := mustCreateAndDialTestServer(t, "GET /lobby/{id}", middlewares.Chain(handler, mw), path)
+	_, cli, res := mustCreateAndDialTestServer(t, "GET /lobby/{id}", mws.Chain(handler, mw), path)
 
 	apiRes, err := cli.ReadResponse()
 	if err != nil {
@@ -200,12 +200,12 @@ func TestLobbyBanner(t *testing.T) {
 func TestLobbyRegister(t *testing.T) {
 	var (
 		lobbies, lobby = mustRegisterLobby(t, defaultTestLobbyOptions)
-		mw             = middlewares.NewLobby(lobbies)
+		mw             = mws.NewLobby(lobbies)
 		handler        = handlers.LobbyHandler(defaultTestConfig, lobbies, defaultTestAcceptOptions)
 		path           = "/lobby/" + lobby.ID()
 	)
 
-	_, cli, _ := mustCreateAndDialTestServer(t, "GET /lobby/{id}", middlewares.Chain(handler, mw), path)
+	_, cli, _ := mustCreateAndDialTestServer(t, "GET /lobby/{id}", mws.Chain(handler, mw), path)
 
 	username := "testuser"
 	want := defaultTestWantLobby
@@ -239,7 +239,7 @@ func TestLobbyRegister(t *testing.T) {
 
 func TestLobbyTimeout(t *testing.T) {
 	var (
-		lobbies = &quiz.Lobbies{}
+		lobbies = quiz.NewLobbiesCache()
 		req     = httptest.NewRequest(http.MethodPost, "/lobby", nil)
 		res     = httptest.NewRecorder()
 	)
@@ -265,12 +265,12 @@ func TestLobbyTimeout(t *testing.T) {
 func TestLobbyPlayerList(t *testing.T) {
 	var (
 		lobbies, lobby = mustRegisterLobby(t, defaultTestLobbyOptions)
-		mw             = middlewares.NewLobby(lobbies)
+		mw             = mws.NewLobby(lobbies)
 		handler        = handlers.LobbyHandler(defaultTestConfig, lobbies, defaultTestAcceptOptions)
 		path           = "/lobby/" + lobby.ID()
 	)
 
-	s, cli, _ := mustCreateAndDialTestServer(t, "GET /lobby/{id}", middlewares.Chain(handler, mw), path)
+	s, cli, _ := mustCreateAndDialTestServer(t, "GET /lobby/{id}", mws.Chain(handler, mw), path)
 
 	// Setup lobby owner
 	owner := "owner"
@@ -321,10 +321,10 @@ func TestLobbyMaxPlayers(t *testing.T) {
 	cfg := defaultTestConfig
 	cfg.Lobby.MaxPlayers = maxPlayers
 
-	mw := middlewares.NewLobby(lobbies)
+	mw := mws.NewLobby(lobbies)
 	handler := handlers.LobbyHandler(cfg, lobbies, defaultTestAcceptOptions)
 	path := "/lobby/" + lobby.ID()
-	s, cli, _ := mustCreateAndDialTestServer(t, "GET /lobby/{id}", middlewares.Chain(handler, mw), path)
+	s, cli, _ := mustCreateAndDialTestServer(t, "GET /lobby/{id}", mws.Chain(handler, mw), path)
 
 	// Setup lobby owner
 	want := defaultTestWantLobby
@@ -345,12 +345,12 @@ func TestLobbyMaxPlayers(t *testing.T) {
 func TestLobbyOwnerElection(t *testing.T) {
 	var (
 		lobbies, lobby = mustRegisterLobby(t, defaultTestLobbyOptions)
-		mw             = middlewares.NewLobby(lobbies)
+		mw             = mws.NewLobby(lobbies)
 		handler        = handlers.LobbyHandler(defaultTestConfig, lobbies, defaultTestAcceptOptions)
 		path           = "/lobby/" + lobby.ID()
 	)
 
-	s, cli, _ := mustCreateAndDialTestServer(t, "GET /lobby/{id}", middlewares.Chain(handler, mw), path)
+	s, cli, _ := mustCreateAndDialTestServer(t, "GET /lobby/{id}", mws.Chain(handler, mw), path)
 
 	// Setup lobby owner
 	owner := "owner"
@@ -383,12 +383,12 @@ func TestLobbyOwnerElection(t *testing.T) {
 func TestLobbyKick(t *testing.T) {
 	var (
 		lobbies, lobby = mustRegisterLobby(t, defaultTestLobbyOptions)
-		mw             = middlewares.NewLobby(lobbies)
+		mw             = mws.NewLobby(lobbies)
 		handler        = handlers.LobbyHandler(defaultTestConfig, lobbies, defaultTestAcceptOptions)
 		path           = "/lobby/" + lobby.ID()
 	)
 
-	s, cli, _ := mustCreateAndDialTestServer(t, "GET /lobby/{id}", middlewares.Chain(handler, mw), path)
+	s, cli, _ := mustCreateAndDialTestServer(t, "GET /lobby/{id}", mws.Chain(handler, mw), path)
 
 	// Setup lobby owner
 	owner := "owner"
@@ -425,12 +425,12 @@ func TestLobbyKick(t *testing.T) {
 func TestLobbyConfigure(t *testing.T) {
 	var (
 		lobbies, lobby = mustRegisterLobby(t, defaultTestLobbyOptions)
-		mw             = middlewares.NewLobby(lobbies)
+		mw             = mws.NewLobby(lobbies)
 		handler        = handlers.LobbyHandler(defaultTestConfig, lobbies, defaultTestAcceptOptions)
 		path           = "/lobby/" + lobby.ID()
 	)
 
-	_, cli, _ := mustCreateAndDialTestServer(t, "GET /lobby/{id}", middlewares.Chain(handler, mw), path)
+	_, cli, _ := mustCreateAndDialTestServer(t, "GET /lobby/{id}", mws.Chain(handler, mw), path)
 
 	// Setup lobby owner
 	owner := "owner"
@@ -452,10 +452,49 @@ func TestLobbyConfigure(t *testing.T) {
 	}
 }
 
-func mustRegisterLobby(t *testing.T, opts quiz.LobbyOptions) (*quiz.Lobbies, *quiz.Lobby) {
+func TestLobbyPassword(t *testing.T) {
+	var (
+		lobbies, lobby = mustRegisterLobby(t, quiz.LobbyOptions{
+			Quizzes:  quizzesFS,
+			Password: "1234",
+		})
+		middlewares = []mws.Middleware{mws.Subprotocols, mws.NewLobby(lobbies)}
+		handler     = handlers.LobbyHandler(defaultTestConfig, lobbies, defaultTestAcceptOptions)
+		path        = "/lobby/" + lobby.ID()
+	)
+
+	s := newTestServer("GET /lobby/{id}", mws.Chain(handler, middlewares...))
+	defer s.Close()
+
+	url := "ws" + strings.TrimPrefix(s.URL, "http") + path
+	cli, res, err := client.Dial(context.Background(), url, nil)
+	if cli != nil {
+		cli.Close()
+	}
+	if err == nil {
+		t.Fatalf("Player was able to join a password protected lobby")
+	}
+	if got, want := res.StatusCode, http.StatusUnauthorized; got != want {
+		t.Errorf("Unexpected status code during ws handshake: got %d, want %d", got, want)
+	}
+
+	url += "?p=1234"
+	cli, res, err = client.Dial(context.Background(), url, nil)
+	if cli != nil {
+		cli.Close()
+	}
+	if err != nil {
+		t.Fatalf("Player was not able to join lobby with password: %v", err)
+	}
+	if got, want := res.StatusCode, http.StatusSwitchingProtocols; got != want {
+		t.Errorf("Unexpected status code during ws handshake: got %d, want %d", got, want)
+	}
+}
+
+func mustRegisterLobby(t *testing.T, opts quiz.LobbyOptions) (quiz.LobbyRepository, *quiz.Lobby) {
 	t.Helper()
 
-	lobbies := &quiz.Lobbies{}
+	lobbies := quiz.NewLobbiesCache()
 	lobby, err := lobbies.Register(opts)
 	if err != nil {
 		t.Fatalf("Could not register lobby: %v", err)
@@ -583,7 +622,7 @@ func mustBroadcastConfigure(t *testing.T, cli *client.Client, quiz string) {
 		t.Fatalf("Could not read configure broadcast: got api response: %+v", res)
 	}
 
-	data, err := api.DecodeJSON[api.LobbyConfigureResponseData](res.Data)
+	data, err := api.DecodeJSON[api.LobbyUpdateResponseData](res.Data)
 	if err != nil {
 		t.Fatalf("Could not decode configure broadcast data: %v", data)
 	}

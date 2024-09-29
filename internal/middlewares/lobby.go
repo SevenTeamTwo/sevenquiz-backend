@@ -18,7 +18,7 @@ const (
 	LobbyRequestKey
 )
 
-func NewLobby(lobbies *quiz.Lobbies) func(http.Handler) http.Handler {
+func NewLobby(lobbies quiz.LobbyRepository) func(http.Handler) http.Handler {
 	return func(h http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			ctx := r.Context()
@@ -32,6 +32,12 @@ func NewLobby(lobbies *quiz.Lobbies) func(http.Handler) http.Handler {
 			lobby, ok := lobbies.Get(id)
 			if !ok || lobby == nil {
 				errs.WriteHTTPError(ctx, w, errs.LobbyNotFoundError(id))
+				return
+			}
+
+			pwd := r.URL.Query().Get("p")
+			if !lobby.CheckPassword(pwd) {
+				errs.WriteHTTPError(ctx, w, errs.UnauthorizedError("invalid lobby password"))
 				return
 			}
 

@@ -11,7 +11,7 @@ import (
 	"sevenquiz-backend/api"
 	"sevenquiz-backend/internal/config"
 	errs "sevenquiz-backend/internal/errors"
-	"sevenquiz-backend/internal/middlewares"
+	mws "sevenquiz-backend/internal/middlewares"
 	"sevenquiz-backend/internal/quiz"
 	"time"
 	"unicode/utf8"
@@ -22,7 +22,7 @@ import (
 
 // CreateLobbyHandler returns a handler capable of creating new lobbies
 // and storing them in the lobbies container.
-func CreateLobbyHandler(cfg config.Config, lobbies *quiz.Lobbies, quizzes fs.FS) http.HandlerFunc {
+func CreateLobbyHandler(cfg config.Config, lobbies quiz.LobbyRepository, quizzes fs.FS) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		lobby, err := lobbies.Register(quiz.LobbyOptions{
 			MaxPlayers: cfg.Lobby.MaxPlayers,
@@ -64,12 +64,12 @@ func LobbyToAPIResponse(lobby *quiz.Lobby) (api.LobbyResponseData, error) {
 
 // LobbyHandler returns a new lobby handler and will run a complete
 // quiz game upon it's completion.
-func LobbyHandler(cfg config.Config, lobbies *quiz.Lobbies, acceptOpts websocket.AcceptOptions) http.HandlerFunc {
+func LobbyHandler(cfg config.Config, lobbies quiz.LobbyRepository, acceptOpts websocket.AcceptOptions) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
 
 		// Lobby is passed via middleware.
-		lobby, ok := ctx.Value(middlewares.LobbyKey).(*quiz.Lobby)
+		lobby, ok := ctx.Value(mws.LobbyKey).(*quiz.Lobby)
 		if !ok {
 			w.WriteHeader(http.StatusInternalServerError)
 			slog.ErrorContext(ctx, "could not retrieve lobby")
@@ -121,7 +121,7 @@ func ping(ctx context.Context, conn *websocket.Conn, interval time.Duration) {
 	}
 }
 
-func handleDisconnect(ctx context.Context, lobbies *quiz.Lobbies, lobby *quiz.Lobby, conn *websocket.Conn) {
+func handleDisconnect(ctx context.Context, lobbies quiz.LobbyRepository, lobby *quiz.Lobby, conn *websocket.Conn) {
 	conn.CloseNow()
 
 	switch lobby.State() {
@@ -205,7 +205,7 @@ func handleRegister(ctx context.Context, lobby *quiz.Lobby, conn *websocket.Conn
 			return
 		}
 
-		reqCtx := context.WithValue(ctx, middlewares.LobbyRequestKey, slog.Any("request", req.Type))
+		reqCtx := context.WithValue(ctx, mws.LobbyRequestKey, slog.Any("request", req.Type))
 		timeoutCtx, cancel := context.WithTimeout(reqCtx, 5*time.Second)
 
 		switch req.Type {
@@ -373,9 +373,14 @@ func handleConfigureRequest(ctx context.Context, lobby *quiz.Lobby, conn *websoc
 		return
 	}
 
-	if err := lobby.SetQuiz(req.Quiz); err != nil {
-		errs.WriteWebsocketError(ctx, conn, errs.QuizFoundError(api.RequestTypeConfigure, "invalid quiz selected"))
-		return
+	if req.Quiz != "" {
+		if err := lobby.SetQuiz(req.Quiz); err != nil {
+			errs.WriteWebsocketError(ctx, conn, errs.QuizFoundError(api.RequestTypeConfigure, "invalid quiz selected"))
+			return
+		}
+	}
+	if req.Password != "" {
+		lobby.SetPassword(req.Password)
 	}
 
 	res := &api.Response[api.EmptyResponseData]{
@@ -388,11 +393,13 @@ func handleConfigureRequest(ctx context.Context, lobby *quiz.Lobby, conn *websoc
 			slog.Any("error", err))
 	}
 
-	if err := lobby.BroadcastConfigure(ctx, req.Quiz); err != nil {
-		slog.Error("broadcast player update: configure",
-			slog.String("username", client.Username()),
-			slog.String("quiz", req.Quiz),
-			slog.Any("error", err))
+	if req.Quiz != "" {
+		if err := lobby.BroadcastConfigure(ctx, req.Quiz); err != nil {
+			slog.Error("broadcast player update: configure",
+				slog.String("username", client.Username()),
+				slog.String("quiz", req.Quiz),
+				slog.Any("error", err))
+		}
 	}
 
 	slog.InfoContext(ctx, "successful request")

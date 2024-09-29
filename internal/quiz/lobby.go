@@ -54,6 +54,7 @@ type Lobby struct {
 	maxPlayers   int
 	quizzes      fs.FS
 	selectedQuiz string
+	password     string
 
 	// players represents all the active players in a lobby.
 	// A LobbyPlayer != nil means a websocket has issued the register cmd.
@@ -102,6 +103,23 @@ func (l *Lobby) SetOwner(username string) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.owner = username
+}
+
+// CheckPassword checks if the input password is valid.
+func (l *Lobby) CheckPassword(password string) bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.password == "" {
+		return true
+	}
+	return password == l.password
+}
+
+// SetPassword sets a lobby password.
+func (l *Lobby) SetPassword(password string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.password = password
 }
 
 // State returns the current lobby state.
@@ -297,9 +315,9 @@ func (l *Lobby) BroadcastPlayerUpdate(ctx context.Context, username, action stri
 }
 
 func (l *Lobby) BroadcastConfigure(ctx context.Context, quiz string) error {
-	res := api.Response[api.LobbyConfigureResponseData]{
+	res := api.Response[api.LobbyUpdateResponseData]{
 		Type: api.ResponseTypeConfigure,
-		Data: api.LobbyConfigureResponseData{
+		Data: api.LobbyUpdateResponseData{
 			Quiz: quiz,
 		},
 	}

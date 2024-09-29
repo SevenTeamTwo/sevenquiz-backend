@@ -28,7 +28,7 @@ func NewClient(conn *websocket.Conn, timeout time.Duration) *Client {
 func Dial(ctx context.Context, u string, opts *websocket.DialOptions) (*Client, *http.Response, error) {
 	conn, res, err := websocket.Dial(ctx, u, opts)
 	if err != nil {
-		return nil, nil, err
+		return nil, res, err
 	}
 	return &Client{
 		conn:    conn,

@@ -17,6 +17,7 @@ var errorCodeHTTPStatusCode = map[api.HTTPErrorCode]int{
 	api.InternalServerErrorHTTPCode: http.StatusInternalServerError,
 	api.InvalidTokenErrorHTTPCode:   http.StatusForbidden,
 	api.InvalidTokenClaimHTTPCode:   http.StatusForbidden,
+	api.UnauthorizedErrorHTTPCode:   http.StatusUnauthorized,
 }
 
 func WriteHTTPError(ctx context.Context, w http.ResponseWriter, err error) {
@@ -132,6 +133,18 @@ func MissingURLQueryError(query string) api.ErrorData[api.HTTPErrorCode] {
 			Query string `json:"query"`
 		}{
 			Query: query,
+		},
+	}
+}
+
+func UnauthorizedError(cause string) api.ErrorData[api.HTTPErrorCode] {
+	return api.ErrorData[api.HTTPErrorCode]{
+		Code:    api.UnauthorizedErrorHTTPCode,
+		Message: "unauthorized",
+		Extra: struct {
+			Cause string `json:"cause"`
+		}{
+			Cause: cause,
 		},
 	}
 }
