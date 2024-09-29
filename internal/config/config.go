@@ -20,9 +20,10 @@ type CORSConf struct {
 }
 
 type Config struct {
-	JWTSecret []byte    `env:"JWT_SECRET"`
-	CORS      CORSConf  `envPrefix:"CORS_"`
-	Lobby     LobbyConf `envPrefix:"LOBBY_"`
+	JWTSecret         []byte    `env:"JWT_SECRET"`
+	CORS              CORSConf  `envPrefix:"CORS_"`
+	Lobby             LobbyConf `envPrefix:"LOBBY_"`
+	RequestsRateLimit int       `env:"REQUESTS_RATE_LIMIT" envDefault:"30"`
 }
 
 func LoadConfig(path string) (Config, error) {
@@ -34,6 +35,7 @@ func LoadConfig(path string) (Config, error) {
 			return Config{}, err
 		}
 	}
+
 	cfg := Config{}
 	err := env.ParseWithOptions(&cfg, env.Options{
 		FuncMap: map[reflect.Type]env.ParserFunc{
@@ -42,5 +44,6 @@ func LoadConfig(path string) (Config, error) {
 			},
 		},
 	})
+
 	return cfg, err
 }

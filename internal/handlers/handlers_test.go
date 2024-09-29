@@ -155,8 +155,12 @@ func TestLobbyBanner(t *testing.T) {
 			Quizzes:    quizzesFS,
 		})
 		mw      = mws.NewLobby(lobbies)
-		handler = handlers.LobbyHandler(defaultTestConfig, lobbies, defaultTestAcceptOptions)
-		path    = "/lobby/" + lobby.ID()
+		handler = handlers.LobbyHandler{
+			Config:        defaultTestConfig,
+			Lobbies:       lobbies,
+			AcceptOptions: defaultTestAcceptOptions,
+		}
+		path = "/lobby/" + lobby.ID()
 	)
 
 	_, cli, res := mustCreateAndDialTestServer(t, "GET /lobby/{id}", mws.Chain(handler, mw), path)
@@ -201,8 +205,12 @@ func TestLobbyRegister(t *testing.T) {
 	var (
 		lobbies, lobby = mustRegisterLobby(t, defaultTestLobbyOptions)
 		mw             = mws.NewLobby(lobbies)
-		handler        = handlers.LobbyHandler(defaultTestConfig, lobbies, defaultTestAcceptOptions)
-		path           = "/lobby/" + lobby.ID()
+		handler        = handlers.LobbyHandler{
+			Config:        defaultTestConfig,
+			Lobbies:       lobbies,
+			AcceptOptions: defaultTestAcceptOptions,
+		}
+		path = "/lobby/" + lobby.ID()
 	)
 
 	_, cli, _ := mustCreateAndDialTestServer(t, "GET /lobby/{id}", mws.Chain(handler, mw), path)
@@ -266,8 +274,12 @@ func TestLobbyPlayerList(t *testing.T) {
 	var (
 		lobbies, lobby = mustRegisterLobby(t, defaultTestLobbyOptions)
 		mw             = mws.NewLobby(lobbies)
-		handler        = handlers.LobbyHandler(defaultTestConfig, lobbies, defaultTestAcceptOptions)
-		path           = "/lobby/" + lobby.ID()
+		handler        = handlers.LobbyHandler{
+			Config:        defaultTestConfig,
+			Lobbies:       lobbies,
+			AcceptOptions: defaultTestAcceptOptions,
+		}
+		path = "/lobby/" + lobby.ID()
 	)
 
 	s, cli, _ := mustCreateAndDialTestServer(t, "GET /lobby/{id}", mws.Chain(handler, mw), path)
@@ -322,7 +334,11 @@ func TestLobbyMaxPlayers(t *testing.T) {
 	cfg.Lobby.MaxPlayers = maxPlayers
 
 	mw := mws.NewLobby(lobbies)
-	handler := handlers.LobbyHandler(cfg, lobbies, defaultTestAcceptOptions)
+	handler := handlers.LobbyHandler{
+		Config:        cfg,
+		Lobbies:       lobbies,
+		AcceptOptions: defaultTestAcceptOptions,
+	}
 	path := "/lobby/" + lobby.ID()
 	s, cli, _ := mustCreateAndDialTestServer(t, "GET /lobby/{id}", mws.Chain(handler, mw), path)
 
@@ -346,8 +362,12 @@ func TestLobbyOwnerElection(t *testing.T) {
 	var (
 		lobbies, lobby = mustRegisterLobby(t, defaultTestLobbyOptions)
 		mw             = mws.NewLobby(lobbies)
-		handler        = handlers.LobbyHandler(defaultTestConfig, lobbies, defaultTestAcceptOptions)
-		path           = "/lobby/" + lobby.ID()
+		handler        = handlers.LobbyHandler{
+			Config:        defaultTestConfig,
+			Lobbies:       lobbies,
+			AcceptOptions: defaultTestAcceptOptions,
+		}
+		path = "/lobby/" + lobby.ID()
 	)
 
 	s, cli, _ := mustCreateAndDialTestServer(t, "GET /lobby/{id}", mws.Chain(handler, mw), path)
@@ -384,8 +404,12 @@ func TestLobbyKick(t *testing.T) {
 	var (
 		lobbies, lobby = mustRegisterLobby(t, defaultTestLobbyOptions)
 		mw             = mws.NewLobby(lobbies)
-		handler        = handlers.LobbyHandler(defaultTestConfig, lobbies, defaultTestAcceptOptions)
-		path           = "/lobby/" + lobby.ID()
+		handler        = handlers.LobbyHandler{
+			Config:        defaultTestConfig,
+			Lobbies:       lobbies,
+			AcceptOptions: defaultTestAcceptOptions,
+		}
+		path = "/lobby/" + lobby.ID()
 	)
 
 	s, cli, _ := mustCreateAndDialTestServer(t, "GET /lobby/{id}", mws.Chain(handler, mw), path)
@@ -426,8 +450,12 @@ func TestLobbyConfigure(t *testing.T) {
 	var (
 		lobbies, lobby = mustRegisterLobby(t, defaultTestLobbyOptions)
 		mw             = mws.NewLobby(lobbies)
-		handler        = handlers.LobbyHandler(defaultTestConfig, lobbies, defaultTestAcceptOptions)
-		path           = "/lobby/" + lobby.ID()
+		handler        = handlers.LobbyHandler{
+			Config:        defaultTestConfig,
+			Lobbies:       lobbies,
+			AcceptOptions: defaultTestAcceptOptions,
+		}
+		path = "/lobby/" + lobby.ID()
 	)
 
 	_, cli, _ := mustCreateAndDialTestServer(t, "GET /lobby/{id}", mws.Chain(handler, mw), path)
@@ -459,8 +487,12 @@ func TestLobbyPassword(t *testing.T) {
 			Password: "1234",
 		})
 		middlewares = []mws.Middleware{mws.Subprotocols, mws.NewLobby(lobbies)}
-		handler     = handlers.LobbyHandler(defaultTestConfig, lobbies, defaultTestAcceptOptions)
-		path        = "/lobby/" + lobby.ID()
+		handler     = handlers.LobbyHandler{
+			Config:        defaultTestConfig,
+			Lobbies:       lobbies,
+			AcceptOptions: defaultTestAcceptOptions,
+		}
+		path = "/lobby/" + lobby.ID()
 	)
 
 	s := newTestServer("GET /lobby/{id}", mws.Chain(handler, middlewares...))

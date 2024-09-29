@@ -13,6 +13,7 @@ import (
 	errs "sevenquiz-backend/internal/errors"
 	mws "sevenquiz-backend/internal/middlewares"
 	"sevenquiz-backend/internal/quiz"
+	"sevenquiz-backend/internal/rate"
 	"time"
 	"unicode/utf8"
 
@@ -62,41 +63,44 @@ func LobbyToAPIResponse(lobby *quiz.Lobby) (api.LobbyResponseData, error) {
 	return data, nil
 }
 
-// LobbyHandler returns a new lobby handler and will run a complete
-// quiz game upon it's completion.
-func LobbyHandler(cfg config.Config, lobbies quiz.LobbyRepository, acceptOpts websocket.AcceptOptions) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		ctx := r.Context()
+type LobbyHandler struct {
+	Config        config.Config
+	Lobbies       quiz.LobbyRepository
+	AcceptOptions websocket.AcceptOptions
+	Limiter       *rate.Limiter
+}
 
-		// Lobby is passed via middleware.
-		lobby, ok := ctx.Value(mws.LobbyKey).(*quiz.Lobby)
-		if !ok {
-			w.WriteHeader(http.StatusInternalServerError)
-			slog.ErrorContext(ctx, "could not retrieve lobby")
-			return
-		}
+func (h LobbyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
 
-		// Transition to the registration state only after a first call to the handler.
-		if lobby.State() == quiz.LobbyStateCreated && lobby.NumConns() == 0 {
-			lobby.SetState(quiz.LobbyStateRegister)
-		}
+	// Lobby is passed via middleware.
+	lobby, ok := ctx.Value(mws.LobbyKey).(*quiz.Lobby)
+	if !ok {
+		w.WriteHeader(http.StatusInternalServerError)
+		slog.ErrorContext(ctx, "could not retrieve lobby")
+		return
+	}
 
-		conn, err := websocket.Accept(w, r, &acceptOpts)
-		if err != nil {
-			// Accept already writes a status code and error message.
-			slog.ErrorContext(ctx, "ws accept", slog.Any("error", err))
-			return
-		}
+	// Transition to the registration state only after a first call to the handler.
+	if lobby.State() == quiz.LobbyStateCreated && lobby.NumConns() == 0 {
+		lobby.SetState(quiz.LobbyStateRegister)
+	}
 
-		conn.SetReadLimit(cfg.Lobby.WebsocketReadLimit)
+	conn, err := websocket.Accept(w, r, &h.AcceptOptions)
+	if err != nil {
+		// Accept already writes a status code and error message.
+		slog.ErrorContext(ctx, "ws accept", slog.Any("error", err))
+		return
+	}
 
-		go ping(ctx, conn, 5*time.Second) // Detect timed out connection.
-		defer handleDisconnect(ctx, lobbies, lobby, conn)
+	conn.SetReadLimit(h.Config.Lobby.WebsocketReadLimit)
 
-		switch lobby.State() {
-		case quiz.LobbyStateCreated, quiz.LobbyStateRegister:
-			handleRegister(ctx, lobby, conn)
-		}
+	go ping(ctx, conn, 5*time.Second) // Detect timed out connection.
+	defer h.handleDisconnect(ctx, lobby, conn)
+
+	switch lobby.State() {
+	case quiz.LobbyStateCreated, quiz.LobbyStateRegister:
+		h.handleRegister(ctx, lobby, conn)
 	}
 }
 
@@ -121,7 +125,7 @@ func ping(ctx context.Context, conn *websocket.Conn, interval time.Duration) {
 	}
 }
 
-func handleDisconnect(ctx context.Context, lobbies quiz.LobbyRepository, lobby *quiz.Lobby, conn *websocket.Conn) {
+func (h LobbyHandler) handleDisconnect(ctx context.Context, lobby *quiz.Lobby, conn *websocket.Conn) {
 	conn.CloseNow()
 
 	switch lobby.State() {
@@ -165,7 +169,7 @@ func handleDisconnect(ctx context.Context, lobbies quiz.LobbyRepository, lobby *
 
 		// No other players in lobby and owner has left so discard lobby.
 		if len(players) == 0 {
-			lobbies.Delete(lobby.ID())
+			h.Lobbies.Delete(lobby.ID())
 			return
 		}
 
@@ -184,7 +188,7 @@ func handleDisconnect(ctx context.Context, lobbies quiz.LobbyRepository, lobby *
 	}
 }
 
-func handleRegister(ctx context.Context, lobby *quiz.Lobby, conn *websocket.Conn) {
+func (h LobbyHandler) handleRegister(ctx context.Context, lobby *quiz.Lobby, conn *websocket.Conn) {
 	lobby.AddConn(conn)
 
 	// Send banner on websocket upgrade with lobby details.
@@ -193,6 +197,11 @@ func handleRegister(ctx context.Context, lobby *quiz.Lobby, conn *websocket.Conn
 	cancel()
 
 	for {
+		if h.Limiter != nil && !h.Limiter.Allow() {
+			if err := h.Limiter.Wait(ctx); err != nil { // Block reading until request is permitted.
+				slog.ErrorContext(ctx, "limiter wait", slog.Any("error", err))
+			}
+		}
 		req := api.Request[json.RawMessage]{}
 		if err := wsjson.Read(ctx, conn, &req); err != nil {
 			if websocket.CloseStatus(err) == -1 { // -1 is considered as an err unrelated to closing.

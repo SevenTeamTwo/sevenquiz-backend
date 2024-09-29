@@ -14,6 +14,7 @@ import (
 	"sevenquiz-backend/internal/handlers"
 	mws "sevenquiz-backend/internal/middlewares"
 	"sevenquiz-backend/internal/quiz"
+	"sevenquiz-backend/internal/rate"
 
 	"github.com/coder/websocket"
 	"github.com/rs/cors"
@@ -41,6 +42,7 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+
 	quizzesFS, err := fs.Sub(quizzes, "quizzes")
 	if err != nil {
 		log.Fatal(err)
@@ -65,8 +67,16 @@ func main() {
 		lobbyMws = append(defaultMws, mws.Subprotocols, mws.NewLobby(lobbies))
 
 		createLobbyHandler = handlers.CreateLobbyHandler(cfg, lobbies, quizzesFS)
-		lobbyHandler       = handlers.LobbyHandler(cfg, lobbies, acceptOpts)
+		lobbyHandler       = handlers.LobbyHandler{
+			Config:        cfg,
+			Lobbies:       lobbies,
+			AcceptOptions: acceptOpts,
+		}
 	)
+
+	if cfg.RequestsRateLimit > 0 {
+		lobbyHandler.Limiter = rate.NewLimiter(time.Second, cfg.RequestsRateLimit)
+	}
 
 	http.Handle("POST /lobby", mws.Chain(createLobbyHandler, defaultMws...))
 	http.Handle("GET /lobby/{id}", mws.Chain(lobbyHandler, lobbyMws...))

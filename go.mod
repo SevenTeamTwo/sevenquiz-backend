@@ -14,6 +14,7 @@ require (
 )
 
 require (
+	github.com/benbjohnson/clock v1.3.5
 	github.com/caarlos0/env/v11 v11.2.2
 	github.com/coder/websocket v1.8.12
 	github.com/golang-jwt/jwt v3.2.2+incompatible

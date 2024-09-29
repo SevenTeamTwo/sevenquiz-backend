@@ -1,5 +1,6 @@
 question:
   type: simple
+  time: 30s
   value: "What is the France's capital ?"
 answer:
   type: textbox
@@ -7,6 +8,7 @@ answer:
 ---
 question:
   type: simple
+  time: 15s
   value: "Who is this character ?"
   image: quizzes/default/assets/yuumi.jpg
 answer:
@@ -20,6 +22,7 @@ answer:
 ---
 question:
   type: simple
+  time: 20s
   value: "Who makes this sound ?"
   audio: quizzes/default/assets/meow.mp3
 answer:
@@ -28,6 +31,7 @@ answer:
 ---
 question:
   type: simple
+  time: 30s
   value: "Where is waldo ?"
   image: quizzes/default/assets/waldo.jpg
 answer:
