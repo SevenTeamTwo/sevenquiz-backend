@@ -13,6 +13,8 @@ import (
 var quizzes embed.FS
 
 func TestListQuizzes(t *testing.T) {
+	t.Parallel()
+
 	lobbies := quiz.NewLobbiesCache()
 	quizzesFS, err := fs.Sub(quizzes, "tests/quizzes")
 	if err != nil {

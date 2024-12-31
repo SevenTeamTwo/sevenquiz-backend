@@ -149,6 +149,8 @@ func TestLobbyCreate(t *testing.T) {
 }
 
 func TestLobbyBanner(t *testing.T) {
+	t.Parallel()
+
 	var (
 		lobbies, lobby = mustRegisterLobby(t, quiz.LobbyOptions{
 			MaxPlayers: 20,
@@ -202,6 +204,8 @@ func TestLobbyBanner(t *testing.T) {
 }
 
 func TestLobbyRegister(t *testing.T) {
+	t.Parallel()
+
 	var (
 		lobbies, lobby = mustRegisterLobby(t, defaultTestLobbyOptions)
 		mw             = mws.NewLobby(lobbies)
@@ -246,6 +250,8 @@ func TestLobbyRegister(t *testing.T) {
 }
 
 func TestLobbyTimeout(t *testing.T) {
+	t.Parallel()
+
 	var (
 		lobbies = quiz.NewLobbiesCache()
 		req     = httptest.NewRequest(http.MethodPost, "/lobby", nil)
@@ -271,6 +277,8 @@ func TestLobbyTimeout(t *testing.T) {
 }
 
 func TestLobbyPlayerList(t *testing.T) {
+	t.Parallel()
+
 	var (
 		lobbies, lobby = mustRegisterLobby(t, defaultTestLobbyOptions)
 		mw             = mws.NewLobby(lobbies)
@@ -322,6 +330,8 @@ func TestLobbyPlayerList(t *testing.T) {
 }
 
 func TestLobbyMaxPlayers(t *testing.T) {
+	t.Parallel()
+
 	var (
 		maxPlayers     = 1
 		lobbies, lobby = mustRegisterLobby(t, quiz.LobbyOptions{
@@ -359,6 +369,8 @@ func TestLobbyMaxPlayers(t *testing.T) {
 }
 
 func TestLobbyOwnerElection(t *testing.T) {
+	t.Parallel()
+
 	var (
 		lobbies, lobby = mustRegisterLobby(t, defaultTestLobbyOptions)
 		mw             = mws.NewLobby(lobbies)
@@ -401,6 +413,8 @@ func TestLobbyOwnerElection(t *testing.T) {
 }
 
 func TestLobbyKick(t *testing.T) {
+	t.Parallel()
+
 	var (
 		lobbies, lobby = mustRegisterLobby(t, defaultTestLobbyOptions)
 		mw             = mws.NewLobby(lobbies)
@@ -447,6 +461,8 @@ func TestLobbyKick(t *testing.T) {
 }
 
 func TestLobbyConfigure(t *testing.T) {
+	t.Parallel()
+
 	var (
 		lobbies, lobby = mustRegisterLobby(t, defaultTestLobbyOptions)
 		mw             = mws.NewLobby(lobbies)
@@ -481,6 +497,8 @@ func TestLobbyConfigure(t *testing.T) {
 }
 
 func TestLobbyPassword(t *testing.T) {
+	t.Parallel()
+
 	var (
 		lobbies, lobby = mustRegisterLobby(t, quiz.LobbyOptions{
 			Quizzes:  quizzesFS,
