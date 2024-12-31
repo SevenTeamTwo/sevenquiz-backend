@@ -58,7 +58,7 @@ type Lobby struct {
 
 	// players represents all the active players in a lobby.
 	// A LobbyPlayer != nil means a websocket has issued the register cmd.
-	players map[*websocket.Conn]*LobbyPlayer
+	players map[*websocket.Conn]*Player
 
 	jwtKey  []byte
 	created time.Time
@@ -219,13 +219,13 @@ func (l *Lobby) numConns() int {
 
 // GetPlayer finds a user by username and returns his associated websocket.
 // A third return value specifies if a player was found.
-func (l *Lobby) GetPlayer(username string) (*websocket.Conn, *LobbyPlayer, bool) {
+func (l *Lobby) GetPlayer(username string) (*websocket.Conn, *Player, bool) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	return l.getPlayer(username)
 }
 
-func (l *Lobby) getPlayer(username string) (*websocket.Conn, *LobbyPlayer, bool) {
+func (l *Lobby) getPlayer(username string) (*websocket.Conn, *Player, bool) {
 	for conn, client := range l.players {
 		if client == nil {
 			continue
@@ -257,7 +257,7 @@ func (l *Lobby) GetPlayerList() []string {
 
 // GetPlayerByConn finds a player by his associated websocket.
 // A second return value specifies if the conn was associated to a lobby player.
-func (l *Lobby) GetPlayerByConn(conn *websocket.Conn) (*LobbyPlayer, bool) {
+func (l *Lobby) GetPlayerByConn(conn *websocket.Conn) (*Player, bool) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	c, ok := l.players[conn]
@@ -265,11 +265,11 @@ func (l *Lobby) GetPlayerByConn(conn *websocket.Conn) (*LobbyPlayer, bool) {
 }
 
 // AddPlayerWithConn registers a conn to a lobby player.
-func (l *Lobby) AddPlayerWithConn(conn *websocket.Conn, username string) *LobbyPlayer {
+func (l *Lobby) AddPlayerWithConn(conn *websocket.Conn, username string) *Player {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
-	cli := &LobbyPlayer{username: username, alive: true}
+	cli := &Player{username: username, alive: true}
 	l.players[conn] = cli
 
 	return cli
@@ -429,36 +429,4 @@ func jwtKeyFunc(key []byte) jwt.Keyfunc {
 		}
 		return key, nil
 	}
-}
-
-// LobbyPlayer represents a registered used in a lobby
-//
-// Multiple goroutines may invoke methods on a LobbyPlayer simultaneously.
-type LobbyPlayer struct {
-	username string
-	score    float64
-	alive    bool
-	mu       sync.Mutex
-}
-
-func (c *LobbyPlayer) Username() string {
-	return c.username
-}
-
-func (c *LobbyPlayer) Disconnect() {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.alive = false
-}
-
-func (c *LobbyPlayer) Alive() bool {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return c.alive
-}
-
-func (c *LobbyPlayer) Connect() {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.alive = true
 }

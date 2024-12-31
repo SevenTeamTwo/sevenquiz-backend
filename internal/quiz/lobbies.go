@@ -86,7 +86,7 @@ func (l *lobbies) Register(opts LobbyOptions) (*Lobby, error) {
 		quizzes:    opts.Quizzes,
 		password:   opts.Password,
 		jwtKey:     newLobbyTokenKey(opts.JWTSalt, id, created),
-		players:    map[*websocket.Conn]*LobbyPlayer{},
+		players:    map[*websocket.Conn]*Player{},
 		created:    created,
 		state:      LobbyStateCreated,
 		doneCh:     make(chan struct{}),

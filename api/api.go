@@ -99,6 +99,10 @@ type (
 		Username string `json:"username,omitempty"`
 		Action   string `json:"action"`
 	}
+
+	AnswerData struct {
+		Value []string
+	}
 )
 
 func DecodeJSON[T any](data json.RawMessage) (res T, err error) {
