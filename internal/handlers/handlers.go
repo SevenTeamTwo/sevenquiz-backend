@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io/fs"
 	"log/slog"
 	"net/http"
 	"sevenquiz-backend/api"
@@ -23,7 +22,7 @@ import (
 
 // CreateLobbyHandler returns a handler capable of creating new lobbies
 // and storing them in the lobbies container.
-func CreateLobbyHandler(cfg config.Config, lobbies quiz.LobbyRepository, quizzes fs.FS) http.HandlerFunc {
+func CreateLobbyHandler(cfg config.Config, lobbies quiz.LobbyRepository, quizzes map[string]api.Quiz) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		lobby, err := lobbies.Register(quiz.LobbyOptions{
 			MaxPlayers: cfg.Lobby.MaxPlayers,
@@ -45,16 +44,12 @@ func CreateLobbyHandler(cfg config.Config, lobbies quiz.LobbyRepository, quizzes
 
 // LobbyToAPIResponse converts a lobby to an API representation.
 func LobbyToAPIResponse(lobby *quiz.Lobby) (api.LobbyResponseData, error) {
-	quizzes, err := lobby.ListQuizzes()
-	if err != nil {
-		return api.LobbyResponseData{}, err
-	}
 	data := api.LobbyResponseData{
 		ID:          lobby.ID(),
 		MaxPlayers:  lobby.MaxPlayers(),
 		PlayerList:  lobby.GetPlayerList(),
 		Created:     lobby.CreationDate().Format(time.RFC3339),
-		Quizzes:     quizzes,
+		Quizzes:     lobby.ListQuizzes(),
 		CurrentQuiz: lobby.Quiz(),
 	}
 	if owner := lobby.Owner(); owner != "" {

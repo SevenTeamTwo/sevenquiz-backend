@@ -1,7 +1,7 @@
 question:
   type: simple
   time: 30s
-  value: "What is the France's capital ?"
+  value: "What is France capital ?"
 answer:
   type: textbox
   response: ["Paris"]

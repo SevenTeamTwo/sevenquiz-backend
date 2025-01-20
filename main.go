@@ -3,13 +3,16 @@ package main
 import (
 	"embed"
 	"errors"
+	"io"
 	"io/fs"
 	"log"
 	"log/slog"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
+	"sevenquiz-backend/api"
 	"sevenquiz-backend/internal/config"
 	"sevenquiz-backend/internal/handlers"
 	mws "sevenquiz-backend/internal/middlewares"
@@ -19,6 +22,7 @@ import (
 	"github.com/coder/websocket"
 	"github.com/rs/cors"
 	sloghttp "github.com/samber/slog-http"
+	"gopkg.in/yaml.v3"
 )
 
 //go:embed quizzes
@@ -48,6 +52,45 @@ func main() {
 		log.Fatal(err)
 	}
 
+	quizzes := map[string]api.Quiz{}
+
+	root := "."
+	depth := 0
+
+	err = fs.WalkDir(quizzesFS, root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if path == root {
+			return nil
+		}
+		if d.IsDir() && strings.Count(path, "/") <= depth {
+			path := d.Name() + "/questions.yml"
+			f, err := quizzesFS.Open(path)
+			if err != nil {
+				return err
+			}
+			quiz := api.Quiz{Name: d.Name()}
+			dec := yaml.NewDecoder(f)
+			for {
+				var q api.Question
+				if err := dec.Decode(&q); err != nil {
+					if errors.Is(err, io.EOF) {
+						break
+					}
+					quiz.Questions = []api.Question{}
+					return err
+				}
+				quiz.Questions = append(quiz.Questions, q)
+			}
+			quizzes[quiz.Name] = quiz
+		}
+		return nil
+	})
+	if err != nil {
+		log.Fatal(err)
+	}
+
 	var (
 		lobbies    = quiz.NewLobbiesCache()
 		acceptOpts = websocket.AcceptOptions{
@@ -66,7 +109,7 @@ func main() {
 		}
 		lobbyMws = append(defaultMws, mws.Subprotocols, mws.NewLobby(lobbies))
 
-		createLobbyHandler = handlers.CreateLobbyHandler(cfg, lobbies, quizzesFS)
+		createLobbyHandler = handlers.CreateLobbyHandler(cfg, lobbies, quizzes)
 		lobbyHandler       = handlers.LobbyHandler{
 			Config:        cfg,
 			Lobbies:       lobbies,

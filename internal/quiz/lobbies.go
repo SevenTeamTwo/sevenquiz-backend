@@ -3,7 +3,7 @@ package quiz
 import (
 	"errors"
 	"fmt"
-	"io/fs"
+	"sevenquiz-backend/api"
 	"sync"
 	"time"
 
@@ -40,9 +40,8 @@ type LobbyOptions struct {
 	// Default is set to 25. Negative value means no limit.
 	MaxPlayers int
 
-	// Quizzes registers an embed filesystem holding all quizzes questions and assets.
-	// All quizzes folders must be at filesystem's root directory.
-	Quizzes fs.FS
+	// Quizzes registers all available quizzes to be selected.
+	Quizzes map[string]api.Quiz
 
 	// JWTSalt is an optional salt to be used while generating the lobby's jwt key.
 	//
@@ -92,15 +91,13 @@ func (l *lobbies) Register(opts LobbyOptions) (*Lobby, error) {
 		doneCh:     make(chan struct{}),
 	}
 
-	quizzes, err := lobby.listQuizzes()
-	if err != nil {
-		return nil, err
-	}
-	if len(quizzes) == 0 {
+	quizzes := lobby.listQuizzes()
+	if len(opts.Quizzes) == 0 {
 		return nil, errors.New("lobby has no quizzes")
 	}
-
-	lobby.selectedQuiz = quizzes[0]
+	if err := lobby.SetQuiz(quizzes[0]); err != nil {
+		return nil, err
+	}
 
 	l.mu.Lock()
 	defer l.mu.Unlock()

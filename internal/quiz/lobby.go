@@ -4,10 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io/fs"
-	"slices"
 	"sort"
-	"strings"
 	"sync"
 	"time"
 
@@ -49,12 +46,12 @@ func (ls LobbyState) String() string {
 //
 // Multiple goroutines may invoke methods on a Lobby simultaneously.
 type Lobby struct {
-	id           string
-	owner        string
-	maxPlayers   int
-	quizzes      fs.FS
-	selectedQuiz string
-	password     string
+	id         string
+	owner      string
+	maxPlayers int
+	quizzes    map[string]api.Quiz
+	quiz       api.Quiz
+	password   string
 
 	// players represents all the active players in a lobby.
 	// A LobbyPlayer != nil means a websocket has issued the register cmd.
@@ -149,50 +146,38 @@ func (l *Lobby) MaxPlayers() int {
 func (l *Lobby) Quiz() string {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	return l.selectedQuiz
+	return l.quiz.Name
 }
 
 func (l *Lobby) SetQuiz(quiz string) error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	return l.setQuiz(quiz)
+}
 
-	quizzes, err := l.listQuizzes()
-	if err != nil {
-		return err
-	}
-	if !slices.Contains(quizzes, quiz) {
+func (l *Lobby) setQuiz(quiz string) error {
+	q, ok := l.quizzes[quiz]
+	if !ok {
 		return errors.New("quiz does not exists")
 	}
-
-	l.selectedQuiz = quiz
-
+	l.quiz = q
 	return nil
 }
 
-func (l *Lobby) ListQuizzes() ([]string, error) {
+func (l *Lobby) ListQuizzes() []string {
 	return l.listQuizzes()
 }
 
-func (l *Lobby) listQuizzes() ([]string, error) {
-	var quizzes []string
+func (l *Lobby) listQuizzes() []string {
+	quizzes := make([]string, 0, len(l.quizzes))
 
-	root := "."
-	depth := 0
+	for name := range l.quizzes {
+		quizzes = append(quizzes, name)
+	}
 
-	err := fs.WalkDir(l.quizzes, root, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if path == root {
-			return nil
-		}
-		if d.IsDir() && strings.Count(path, "/") <= depth {
-			quizzes = append(quizzes, d.Name())
-		}
-		return nil
-	})
+	sort.Strings(quizzes)
 
-	return quizzes, err
+	return quizzes
 }
 
 // IsFull checks the total number of registered websockets in a

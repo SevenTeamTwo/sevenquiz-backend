@@ -4,6 +4,7 @@ import (
 	"context"
 	"embed"
 	"encoding/json"
+	"errors"
 	"io"
 	"io/fs"
 	"log"
@@ -23,22 +24,66 @@ import (
 
 	"github.com/coder/websocket"
 	"github.com/google/go-cmp/cmp"
+	"gopkg.in/yaml.v3"
 )
 
-var (
-	//go:embed tests/quizzes
-	quizzes   embed.FS
-	quizzesFS fs.FS
-)
+//go:embed tests/quizzes
+var quizzes embed.FS
+
+func getQuizzesFromFS(quizFS fs.FS) (map[string]api.Quiz, error) {
+	quizzes := map[string]api.Quiz{}
+
+	root := "."
+	depth := 0
+
+	err := fs.WalkDir(quizFS, root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if path == root {
+			return nil
+		}
+		if d.IsDir() && strings.Count(path, "/") <= depth {
+			path := d.Name() + "/questions.yml"
+			f, err := quizFS.Open(path)
+			if err != nil {
+				return err
+			}
+			quiz := api.Quiz{Name: d.Name()}
+			dec := yaml.NewDecoder(f)
+			for {
+				var q api.Question
+				if err := dec.Decode(&q); err != nil {
+					if errors.Is(err, io.EOF) {
+						break
+					}
+					quiz.Questions = []api.Question{}
+					return err
+				}
+				quiz.Questions = append(quiz.Questions, q)
+			}
+			quizzes[quiz.Name] = quiz
+		}
+		return nil
+	})
+
+	return quizzes, err
+}
 
 func init() {
 	log.SetOutput(io.Discard)
 
 	var err error
-	if quizzesFS, err = fs.Sub(quizzes, "tests/quizzes"); err != nil {
+	quizzesFS, err := fs.Sub(quizzes, "tests/quizzes")
+	if err != nil {
 		log.Fatal(err)
 	}
-	defaultTestLobbyOptions.Quizzes = quizzesFS
+	quizzes, err := getQuizzesFromFS(quizzesFS)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	defaultTestLobbyOptions.Quizzes = quizzes
 }
 
 var (
@@ -60,7 +105,6 @@ var (
 	}
 	defaultTestLobbyOptions = quiz.LobbyOptions{
 		MaxPlayers: 20,
-		Quizzes:    quizzesFS,
 	}
 )
 
@@ -112,7 +156,7 @@ func TestLobbyCreate(t *testing.T) {
 	}
 
 	// Should spawn a goroutine for lobby timeout.
-	handlers.CreateLobbyHandler(defaultTestConfig, lobbies, quizzesFS)(res, req)
+	handlers.CreateLobbyHandler(defaultTestConfig, lobbies, defaultTestLobbyOptions.Quizzes)(res, req)
 
 	if got, want := runtime.NumGoroutine(), 3; got != want {
 		t.Error("Lobby's timeout goroutine did not spawn")
@@ -154,7 +198,7 @@ func TestLobbyBanner(t *testing.T) {
 	var (
 		lobbies, lobby = mustRegisterLobby(t, quiz.LobbyOptions{
 			MaxPlayers: 20,
-			Quizzes:    quizzesFS,
+			Quizzes:    defaultTestLobbyOptions.Quizzes,
 		})
 		mw      = mws.NewLobby(lobbies)
 		handler = handlers.LobbyHandler{
@@ -261,7 +305,7 @@ func TestLobbyTimeout(t *testing.T) {
 	cfg := defaultTestConfig
 	cfg.Lobby.RegisterTimeout = time.Nanosecond
 
-	handlers.CreateLobbyHandler(cfg, lobbies, quizzesFS)(res, req)
+	handlers.CreateLobbyHandler(cfg, lobbies, defaultTestLobbyOptions.Quizzes)(res, req)
 
 	apiRes := &api.CreateLobbyResponseData{}
 	if err := json.NewDecoder(res.Body).Decode(apiRes); err != nil {
@@ -336,7 +380,7 @@ func TestLobbyMaxPlayers(t *testing.T) {
 		maxPlayers     = 1
 		lobbies, lobby = mustRegisterLobby(t, quiz.LobbyOptions{
 			MaxPlayers: maxPlayers,
-			Quizzes:    quizzesFS,
+			Quizzes:    defaultTestLobbyOptions.Quizzes,
 		})
 	)
 
@@ -501,7 +545,7 @@ func TestLobbyPassword(t *testing.T) {
 
 	var (
 		lobbies, lobby = mustRegisterLobby(t, quiz.LobbyOptions{
-			Quizzes:  quizzesFS,
+			Quizzes:  defaultTestLobbyOptions.Quizzes,
 			Password: "1234",
 		})
 		middlewares = []mws.Middleware{mws.Subprotocols, mws.NewLobby(lobbies)}
