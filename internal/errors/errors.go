@@ -174,7 +174,7 @@ func PlayerFoundError(req api.RequestType, username string) api.ErrorData[api.We
 	}
 }
 
-func QuizFoundError(req api.RequestType, quiz string) api.ErrorData[api.WebsocketErrorCode] {
+func QuizNotFoundError(req api.RequestType, quiz string) api.ErrorData[api.WebsocketErrorCode] {
 	return api.ErrorData[api.WebsocketErrorCode]{
 		Request: req,
 		Code:    api.QuizNotFoundErrorCode,

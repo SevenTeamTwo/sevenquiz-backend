@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"iter"
 	"sort"
 	"sync"
 	"time"
@@ -51,6 +52,7 @@ type Lobby struct {
 	maxPlayers int
 	quizzes    map[string]api.Quiz
 	quiz       api.Quiz
+	question   *api.Question
 	password   string
 
 	// players represents all the active players in a lobby.
@@ -59,23 +61,47 @@ type Lobby struct {
 
 	jwtKey  []byte
 	created time.Time
-	mu      sync.Mutex
+	mu      sync.RWMutex
 	state   LobbyState
 	doneCh  chan struct{}
 }
 
 // Close shutdowns a lobby and closes all registered websockets.
-func (l *Lobby) Close() {
+func (l *Lobby) Close() error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
+	var err error
 	for c := range l.players {
 		if c != nil {
-			c.Close(websocket.StatusNormalClosure, "lobby closes")
+			err2 := c.Close(websocket.StatusNormalClosure, "lobby closes")
+			if err == nil && err2 != nil {
+				err = err2
+			}
 		}
 	}
 
 	close(l.doneCh)
+
+	return err
+}
+
+// CloseUnregisteredConns shutdowns all websockets that did not register as a player.
+func (l *Lobby) CloseUnregisteredConns() error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	var err error
+	for c, player := range l.allPlayers(false) {
+		if player == nil {
+			err2 := c.Close(websocket.StatusNormalClosure, "closing of unregistered conns")
+			if err == nil && err2 != nil {
+				err = err2
+			}
+		}
+	}
+
+	return err
 }
 
 // Done returns if a lobby has been closed.
@@ -90,8 +116,8 @@ func (l *Lobby) ID() string {
 
 // Owner returns the current lobby owner.
 func (l *Lobby) Owner() string {
-	l.mu.Lock()
-	defer l.mu.Unlock()
+	l.mu.RLock()
+	defer l.mu.RUnlock()
 	return l.owner
 }
 
@@ -104,8 +130,8 @@ func (l *Lobby) SetOwner(username string) {
 
 // CheckPassword checks if the input password is valid.
 func (l *Lobby) CheckPassword(password string) bool {
-	l.mu.Lock()
-	defer l.mu.Unlock()
+	l.mu.RLock()
+	defer l.mu.RUnlock()
 	if l.password == "" {
 		return true
 	}
@@ -121,8 +147,8 @@ func (l *Lobby) SetPassword(password string) {
 
 // State returns the current lobby state.
 func (l *Lobby) State() LobbyState {
-	l.mu.Lock()
-	defer l.mu.Unlock()
+	l.mu.RLock()
+	defer l.mu.RUnlock()
 	return l.state
 }
 
@@ -131,6 +157,19 @@ func (l *Lobby) SetState(state LobbyState) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.state = state
+}
+
+// SetCurrentQuestion updates a lobby question.
+func (l *Lobby) SetCurrentQuestion(question *api.Question) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.question = question
+}
+
+func (l *Lobby) CurrentQuestion() *api.Question {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+	return l.question
 }
 
 // CreationDate returns when a lobby was originally created.
@@ -143,25 +182,23 @@ func (l *Lobby) MaxPlayers() int {
 	return l.maxPlayers
 }
 
-func (l *Lobby) Quiz() string {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	return l.quiz.Name
+func (l *Lobby) Quiz() api.Quiz {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+	return l.quiz
 }
 
-func (l *Lobby) SetQuiz(quiz string) error {
+func (l *Lobby) SetQuiz(quiz api.Quiz) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	return l.setQuiz(quiz)
+	l.quiz = quiz
 }
 
-func (l *Lobby) setQuiz(quiz string) error {
+func (l *Lobby) LoadQuiz(quiz string) (api.Quiz, bool) {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
 	q, ok := l.quizzes[quiz]
-	if !ok {
-		return errors.New("quiz does not exists")
-	}
-	l.quiz = q
-	return nil
+	return q, ok
 }
 
 func (l *Lobby) ListQuizzes() []string {
@@ -183,30 +220,27 @@ func (l *Lobby) listQuizzes() []string {
 // IsFull checks the total number of registered websockets in a
 // lobby and returns true if it exceeds the lobby's max players.
 func (l *Lobby) IsFull() bool {
-	l.mu.Lock()
-	defer l.mu.Unlock()
+	l.mu.RLock()
+	defer l.mu.RUnlock()
 	return l.maxPlayers >= 0 && l.numConns() >= l.maxPlayers
 }
 
 // NumConns returns the number of websockets registered in a lobby.
 func (l *Lobby) NumConns() int {
-	l.mu.Lock()
-	defer l.mu.Unlock()
+	l.mu.RLock()
+	defer l.mu.RUnlock()
 	return l.numConns()
 }
 
 func (l *Lobby) numConns() int {
-	if _, ok := l.players[nil]; ok {
-		return len(l.players) - 1
-	}
 	return len(l.players)
 }
 
 // GetPlayer finds a user by username and returns his associated websocket.
 // A third return value specifies if a player was found.
 func (l *Lobby) GetPlayer(username string) (*websocket.Conn, *Player, bool) {
-	l.mu.Lock()
-	defer l.mu.Unlock()
+	l.mu.RLock()
+	defer l.mu.RUnlock()
 	return l.getPlayer(username)
 }
 
@@ -224,8 +258,8 @@ func (l *Lobby) getPlayer(username string) (*websocket.Conn, *Player, bool) {
 
 // GetPlayerList returns the current lobby player list.
 func (l *Lobby) GetPlayerList() []string {
-	l.mu.Lock()
-	defer l.mu.Unlock()
+	l.mu.RLock()
+	defer l.mu.RUnlock()
 
 	players := make([]string, 0, l.numConns())
 	for _, client := range l.players {
@@ -243,8 +277,8 @@ func (l *Lobby) GetPlayerList() []string {
 // GetPlayerByConn finds a player by his associated websocket.
 // A second return value specifies if the conn was associated to a lobby player.
 func (l *Lobby) GetPlayerByConn(conn *websocket.Conn) (*Player, bool) {
-	l.mu.Lock()
-	defer l.mu.Unlock()
+	l.mu.RLock()
+	defer l.mu.RUnlock()
 	c, ok := l.players[conn]
 	return c, ok
 }
@@ -268,45 +302,90 @@ func (l *Lobby) AddConn(conn *websocket.Conn) {
 	l.players[conn] = nil
 }
 
-// Broadcast sends a JSON message to all players and websockets
-// active in the lobby.
-func (l *Lobby) Broadcast(ctx context.Context, v any) error {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-
-	errs := errgroup.Group{}
-	for conn := range l.players {
-		errs.Go(func() error {
-			if conn == nil {
-				return nil
+func (l *Lobby) allPlayers(registeredOnly bool) iter.Seq2[*websocket.Conn, *Player] {
+	return func(yield func(*websocket.Conn, *Player) bool) {
+		for i, v := range l.players {
+			if i == nil {
+				continue
 			}
-			return wsjson.Write(ctx, conn, v)
-		})
+			if registeredOnly && v == nil {
+				continue
+			}
+			if !yield(i, v) {
+				return
+			}
+		}
 	}
-	return errs.Wait()
 }
 
 // BroadcastPlayerUpdate broadcast a player event to all players
 // and websockets active in the lobby.
 func (l *Lobby) BroadcastPlayerUpdate(ctx context.Context, username, action string) error {
-	res := api.Response[api.PlayerUpdateResponseData]{
-		Type: api.ResponseTypePlayerUpdate,
-		Data: api.PlayerUpdateResponseData{
-			Username: username,
-			Action:   action,
-		},
-	}
-	return l.Broadcast(ctx, res)
+	return l.Broadcast(ctx, func(_ *Player) any {
+		return api.Response[api.PlayerUpdateResponseData]{
+			Type: api.ResponseTypePlayerUpdate,
+			Data: api.PlayerUpdateResponseData{
+				Username: username,
+				Action:   action,
+			},
+		}
+	})
 }
 
 func (l *Lobby) BroadcastConfigure(ctx context.Context, quiz string) error {
-	res := api.Response[api.LobbyUpdateResponseData]{
-		Type: api.ResponseTypeConfigure,
-		Data: api.LobbyUpdateResponseData{
-			Quiz: quiz,
-		},
+	return l.Broadcast(ctx, func(_ *Player) any {
+		return api.Response[api.LobbyUpdateResponseData]{
+			Type: api.ResponseTypeConfigure,
+			Data: api.LobbyUpdateResponseData{
+				Quiz: quiz,
+			},
+		}
+	})
+}
+
+func (l *Lobby) BroadcastQuestion(ctx context.Context, question api.Question) error {
+	return l.Broadcast(ctx, func(_ *Player) any {
+		return api.Response[api.QuestionResponseData]{
+			Type: api.ResponseTypeQuestion,
+			Data: api.QuestionResponseData{
+				Question: question,
+			},
+		}
+	})
+}
+
+func (l *Lobby) Broadcast(ctx context.Context, fn func(player *Player) any) error {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+
+	errs := errgroup.Group{}
+	for conn, player := range l.allPlayers(true) {
+		errs.Go(func() error {
+			res := fn(player)
+			err := wsjson.Write(ctx, conn, res)
+			if err != nil && player != nil {
+				err = fmt.Errorf("%s: %w", player.username, err)
+			}
+			return err
+		})
 	}
-	return l.Broadcast(ctx, res)
+
+	return errs.Wait()
+}
+
+func (l *Lobby) BroadcastStart(ctx context.Context) error {
+	return l.Broadcast(ctx, func(player *Player) any {
+		token, err := l.NewToken(player.Username())
+		if err != nil {
+			return err
+		}
+		return api.Response[api.StartResponseData]{
+			Type: api.ResponseTypeStart,
+			Data: api.StartResponseData{
+				Token: token,
+			},
+		}
+	})
 }
 
 // ReplacePlayerConn replaces a conn for the specified player and

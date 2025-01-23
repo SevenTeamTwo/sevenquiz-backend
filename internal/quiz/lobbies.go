@@ -13,7 +13,7 @@ import (
 
 type lobbies struct {
 	lobbies map[string]*Lobby
-	mu      sync.Mutex
+	mu      sync.RWMutex
 }
 
 // NewLobbiesCache returns an in-memory storage of quiz lobbies.
@@ -95,9 +95,11 @@ func (l *lobbies) Register(opts LobbyOptions) (*Lobby, error) {
 	if len(opts.Quizzes) == 0 {
 		return nil, errors.New("lobby has no quizzes")
 	}
-	if err := lobby.SetQuiz(quizzes[0]); err != nil {
-		return nil, err
+	q, ok := lobby.LoadQuiz(quizzes[0])
+	if !ok {
+		return nil, errors.New("quiz does not exists")
 	}
+	lobby.SetQuiz(q)
 
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -153,8 +155,8 @@ func newLobbyTokenKey(secret []byte, id string, created time.Time) []byte {
 
 // Get retrieves a lobby by unique id.
 func (l *lobbies) Get(id string) (*Lobby, bool) {
-	l.mu.Lock()
-	defer l.mu.Unlock()
+	l.mu.RLock()
+	defer l.mu.RUnlock()
 	lobby, ok := l.lobbies[id]
 	return lobby, ok
 }
@@ -165,7 +167,7 @@ func (l *lobbies) Delete(id string) {
 	defer l.mu.Unlock()
 
 	if lobby := l.lobbies[id]; lobby != nil {
-		lobby.Close()
+		_ = lobby.Close()
 	}
 
 	delete(l.lobbies, id)

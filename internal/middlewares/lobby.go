@@ -41,10 +41,15 @@ func NewLobby(lobbies quiz.LobbyRepository) func(http.Handler) http.Handler {
 				return
 			}
 
-			state := lobby.State()
-			if state == quiz.LobbyStateRegister && lobby.IsFull() {
-				errs.WriteHTTPError(ctx, w, errs.TooManyPlayersError(lobby.MaxPlayers()))
-				return
+			switch lobby.State() {
+			case quiz.LobbyStateRegister:
+				if lobby.IsFull() {
+					errs.WriteHTTPError(ctx, w, errs.TooManyPlayersError(lobby.MaxPlayers()))
+					return
+				}
+			case quiz.LobbyStateQuiz:
+				// TODO: check JWT
+				// TODO: re-assign conn to player
 			}
 
 			// TODO: restitute via token and pass the LobbyPlayerKey to context

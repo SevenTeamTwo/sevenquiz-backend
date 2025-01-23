@@ -1,6 +1,6 @@
 package api
 
 type Quiz struct {
-	Name      string
-	Questions []Question
+	Name      string     `json:"name"`
+	Questions []Question `json:"questions"`
 }

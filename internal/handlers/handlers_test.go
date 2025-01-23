@@ -535,7 +535,7 @@ func TestLobbyConfigure(t *testing.T) {
 
 	mustBroadcastConfigure(t, cli, wantLobby.Quizzes[1])
 
-	if got, want := lobby.Quiz(), wantLobby.Quizzes[1]; got != want {
+	if got, want := lobby.Quiz().Name, wantLobby.Quizzes[1]; got != want {
 		t.Errorf("Invalid configured quiz in lobby: got %s, want %s", got, want)
 	}
 }

@@ -1,40 +1,17 @@
-question:
-  type: simple
-  time: 30s
-  value: "What is France capital ?"
-answer:
-  type: textbox
-  response: ["Paris"]
+Title: Name France's capital
+Type: text
+Time: 10s
+Answer:
+  Text: Paris
 ---
-question:
-  type: simple
-  time: 15s
-  value: "Who is this character ?"
-  image: quizzes/default/assets/yuumi.jpg
-answer:
-  type: multivalues
-  options: 
-    a: Yasuo
-    b: Master Yi
-    c: Yuumo
-    d: Teemo
-  response: ["Yuumi"]
+Title: Name UK's capital
+Type: text
+Time: 5s
+Answer:
+  Text: London
 ---
-question:
-  type: simple
-  time: 20s
-  value: "Who makes this sound ?"
-  audio: quizzes/default/assets/meow.mp3
-answer:
-  type: textbox
-  response: ["Cat"]
----
-question:
-  type: simple
-  time: 30s
-  value: "Where is waldo ?"
-  image: quizzes/default/assets/waldo.jpg
-answer:
-  type: image_click
-  image: quizzes/default/assets/waldo_answer.jpg
-  response: ["180.4", "34.5"]
+Title: Name Spain's capital
+Type: text
+Time: 5s
+Answer:
+  Text: Madrid

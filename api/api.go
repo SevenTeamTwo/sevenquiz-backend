@@ -19,6 +19,9 @@ const (
 	ResponseTypeKick         ResponseType = "kick"
 	ResponseTypePlayerUpdate ResponseType = "playerUpdate"
 	ResponseTypeConfigure    ResponseType = "configure"
+	ResponseTypeStart        ResponseType = "start"
+	ResponseTypeQuestion     ResponseType = "question"
+	ResponseTypeAnswer       ResponseType = "answer"
 )
 
 func (r ResponseType) String() string {
@@ -37,6 +40,8 @@ const (
 	RequestTypeLobby     RequestType = "lobby"
 	RequestTypeKick      RequestType = "kick"
 	RequestTypeConfigure RequestType = "configure"
+	RequestTypeStart     RequestType = "start"
+	RequestTypeAnswer    RequestType = "answer"
 	RequestTypeUnknown   RequestType = "unknown"
 )
 
@@ -56,6 +61,8 @@ type ResponseData interface {
 		CreateLobbyResponseData |
 		PlayerUpdateResponseData |
 		LobbyUpdateResponseData |
+		StartResponseData |
+		QuestionResponseData |
 		HTTPErrorData | WebsocketErrorData |
 		EmptyResponseData | json.RawMessage
 }
@@ -65,13 +72,14 @@ type (
 	EmptyResponseData *struct{}
 
 	LobbyResponseData struct {
-		ID          string   `json:"id"`
-		Owner       *string  `json:"owner"`
-		MaxPlayers  int      `json:"maxPlayers"`
-		PlayerList  []string `json:"playerList"`
-		Quizzes     []string `json:"quizzes"`
-		CurrentQuiz string   `json:"currentQuiz"`
-		Created     string   `json:"created"`
+		ID              string    `json:"id"`
+		Owner           *string   `json:"owner"`
+		MaxPlayers      int       `json:"maxPlayers"`
+		PlayerList      []string  `json:"playerList"`
+		Quizzes         []string  `json:"quizzes"`
+		CurrentQuiz     string    `json:"currentQuiz"`
+		CurrentQuestion *Question `json:"currentQuestion"`
+		Created         string    `json:"created"`
 	}
 
 	LobbyConfigureRequestData struct {
@@ -100,8 +108,16 @@ type (
 		Action   string `json:"action"`
 	}
 
-	AnswerData struct {
-		Value []string
+	AnswerResponseData struct {
+		Answer Answer `json:"answer"`
+	}
+
+	StartResponseData struct {
+		Token string `json:"token"`
+	}
+
+	QuestionResponseData struct {
+		Question Question `json:"question"`
 	}
 )
 
