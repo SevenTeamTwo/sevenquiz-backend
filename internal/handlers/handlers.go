@@ -24,9 +24,9 @@ import (
 func CreateLobbyHandler(cfg config.Config, lobbies quiz.LobbyRepository, quizzes map[string]api.Quiz) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		lobby, err := lobbies.Register(quiz.LobbyOptions{
-			MaxPlayers: cfg.Lobby.MaxPlayers,
-			Quizzes:    quizzes, // TODO: open on system instead of embed ?
-			Timeout:    cfg.Lobby.RegisterTimeout,
+			MaxPlayers:      cfg.Lobby.MaxPlayers,
+			Quizzes:         quizzes, // TODO: open on system instead of embed ?
+			RegisterTimeout: cfg.Lobby.RegisterTimeout,
 		})
 		if err != nil {
 			errs.WriteHTTPError(r.Context(), w, errs.HTTPInternalServerError(err))
@@ -101,11 +101,7 @@ func (h LobbyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		case quiz.LobbyStateQuiz:
 			h.handleQuizState(timeoutCtx, req, lobby, conn)
 		case quiz.LobbyStateAnswers:
-			// player, _ := lobby.GetPlayerByConn(conn)
-			// for i, answer := range player.AllAnswers() {
-			// 	fmt.Println(i, answer)
-			// }
-			return
+			h.handleReviewState(timeoutCtx, req, lobby, conn)
 		}
 
 		cancel()

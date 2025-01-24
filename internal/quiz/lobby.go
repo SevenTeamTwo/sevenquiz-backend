@@ -64,12 +64,23 @@ type Lobby struct {
 	mu      sync.RWMutex
 	state   LobbyState
 	doneCh  chan struct{}
+	review  chan bool
+}
+
+func (l *Lobby) SendReview(validate bool) {
+	l.review <- validate
+}
+
+func (l *Lobby) NextReview() <-chan bool {
+	return l.review
 }
 
 // Close shutdowns a lobby and closes all registered websockets.
 func (l *Lobby) Close() error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
+
+	l.state = LobbyStateEnded
 
 	var err error
 	for c := range l.players {
@@ -98,6 +109,7 @@ func (l *Lobby) CloseUnregisteredConns() error {
 			if err == nil && err2 != nil {
 				err = err2
 			}
+			delete(l.players, c)
 		}
 	}
 
@@ -288,7 +300,7 @@ func (l *Lobby) AddPlayerWithConn(conn *websocket.Conn, username string) *Player
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
-	cli := &Player{username: username, alive: true}
+	cli := &Player{username: username, alive: true, answers: map[int]api.Answer{}}
 	l.players[conn] = cli
 
 	return cli
@@ -300,6 +312,12 @@ func (l *Lobby) AddConn(conn *websocket.Conn) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.players[conn] = nil
+}
+
+func (l *Lobby) AllPlayers() iter.Seq2[*websocket.Conn, *Player] {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+	return l.allPlayers(false)
 }
 
 func (l *Lobby) allPlayers(registeredOnly bool) iter.Seq2[*websocket.Conn, *Player] {
@@ -349,6 +367,30 @@ func (l *Lobby) BroadcastQuestion(ctx context.Context, question api.Question) er
 			Type: api.ResponseTypeQuestion,
 			Data: api.QuestionResponseData{
 				Question: question,
+			},
+		}
+	})
+}
+
+func (l *Lobby) BroadcastReview(ctx context.Context, question api.Question, player string, answer api.Answer) error {
+	return l.Broadcast(ctx, func(_ *Player) any {
+		return api.Response[api.ReviewResponseData]{
+			Type: api.ResponseTypeReview,
+			Data: api.ReviewResponseData{
+				Question: question,
+				Player:   player,
+				Answer:   answer,
+			},
+		}
+	})
+}
+
+func (l *Lobby) BroadcastResults(ctx context.Context, results map[string]int) error {
+	return l.Broadcast(ctx, func(_ *Player) any {
+		return api.Response[api.ResultsResponseData]{
+			Type: api.ResponseTypeResults,
+			Data: api.ResultsResponseData{
+				Results: results,
 			},
 		}
 	})

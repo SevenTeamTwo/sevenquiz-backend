@@ -12,6 +12,7 @@ import (
 type Player struct {
 	username string
 	answers  map[int]api.Answer
+	score    int
 	alive    bool
 	mu       sync.RWMutex
 }
@@ -26,6 +27,18 @@ func (p *Player) AllAnswers() iter.Seq2[int, api.Answer] {
 			}
 		}
 	}
+}
+
+func (p *Player) AddScore(delta int) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.score += delta
+}
+
+func (p *Player) Score() int {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return p.score
 }
 
 func (p *Player) Username() string {
@@ -53,8 +66,11 @@ func (p *Player) Connect() {
 func (p *Player) RegisterAnswer(questionID int, answer api.Answer) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if p.answers == nil {
-		p.answers = map[int]api.Answer{}
-	}
 	p.answers[questionID] = answer
+}
+
+func (p *Player) GetAnswer(questionID int) api.Answer {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return p.answers[questionID]
 }

@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"sevenquiz-backend/api"
@@ -217,46 +218,110 @@ func handleStartRequest(ctx context.Context, lobby *quiz.Lobby, conn *websocket.
 		return
 	}
 
+	go func() { //nolint:contextcheck
+		if err := runQuiz(lobby); err != nil {
+			slog.Info("run quiz", slog.Any("error", err))
+			return
+		}
+		if err := runReview(lobby); err != nil {
+			slog.Info("run review", slog.Any("error", err))
+			return
+		}
+
+		_ = lobby.Close()
+	}()
+}
+
+func runQuiz(lobby *quiz.Lobby) error {
+	lobby.SetState(quiz.LobbyStateQuiz)
+
+	// Setup each question with a unique ID to link answers.
+	// TODO: at lobby register once ?
 	q := lobby.Quiz()
 	for i, question := range q.Questions {
 		question.ID = i
 		q.Questions[i] = question
 	}
-
 	lobby.SetQuiz(q)
-	lobby.SetState(quiz.LobbyStateQuiz)
+
 	_ = lobby.CloseUnregisteredConns()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	if err := lobby.BroadcastStart(ctx); err != nil {
 		slog.Error("broadcast start", slog.Any("error", err))
 	}
+	cancel()
 
-	go func() { //nolint:contextcheck
-		for _, question := range lobby.Quiz().Questions {
-			if lobby.State() == quiz.LobbyStateEnded { // All players left.
-				slog.Info("quiz has ended")
-				return
-			}
-
-			question.Answer = nil
-			if question.Time <= 0 {
-				question.Time = 30 * time.Second
-			}
-			lobby.SetCurrentQuestion(&question)
-
-			start := time.Now()
-
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			if err := lobby.BroadcastQuestion(ctx, question); err != nil {
-				slog.Error("broadcast question", slog.Any("error", err))
-			}
-			cancel()
-
-			deadline, cancel := context.WithDeadline(context.Background(), start.Add(question.Time))
-			<-deadline.Done()
-			cancel()
+	for _, question := range lobby.Quiz().Questions {
+		if lobby.State() == quiz.LobbyStateEnded { // All players left.
+			return errors.New("quiz has ended")
 		}
 
-		lobby.SetCurrentQuestion(nil)
-		lobby.SetState(quiz.LobbyStateAnswers)
-	}()
+		question.Answer = nil
+		if question.Time <= 0 {
+			question.Time = 30 * time.Second
+		}
+		lobby.SetCurrentQuestion(&question)
+
+		start := time.Now()
+
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		if err := lobby.BroadcastQuestion(ctx, question); err != nil {
+			slog.Error("broadcast question", slog.Any("error", err))
+		}
+		cancel()
+
+		deadline, cancel := context.WithDeadline(context.Background(), start.Add(question.Time))
+		<-deadline.Done()
+		cancel()
+	}
+
+	lobby.SetCurrentQuestion(nil)
+
+	return nil
+}
+
+func runReview(lobby *quiz.Lobby) error {
+	lobby.SetState(quiz.LobbyStateAnswers)
+
+	for _, question := range lobby.Quiz().Questions {
+		if lobby.State() == quiz.LobbyStateEnded { // All players left.
+			return errors.New("quiz has ended")
+		}
+
+		if question.Time <= 0 {
+			question.Time = 30 * time.Second
+		}
+
+		for _, player := range lobby.AllPlayers() {
+			answer := player.GetAnswer(question.ID)
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			if err := lobby.BroadcastReview(ctx, question, player.Username(), answer); err != nil {
+				slog.Error("broadcast review", slog.Any("error", err))
+			}
+			select {
+			case <-lobby.Done(): // Maximum lobby timeout.
+				cancel()
+				return errors.New("quiz has ended")
+			case ok := <-lobby.NextReview():
+				if ok {
+					player.AddScore(1)
+				}
+			}
+			cancel()
+		}
+	}
+
+	results := map[string]int{}
+	for _, player := range lobby.AllPlayers() {
+		results[player.Username()] = player.Score()
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	if err := lobby.BroadcastResults(ctx, results); err != nil {
+		slog.Error("broadcast results", slog.Any("error", err))
+	}
+	cancel()
+
+	return nil
 }

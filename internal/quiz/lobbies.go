@@ -49,10 +49,16 @@ type LobbyOptions struct {
 	// the ID and timestamp is used.
 	JWTSalt []byte
 
-	// Timeout sets a duration before a lobby expires.
+	// RegisterTimeout sets a duration before a lobby expires.
 	// A lobby expires if his state is still Created or Registered after timeout.
 	//
 	// Default is 15 minutes. Set a negative value to disable it.
+	RegisterTimeout time.Duration
+
+	// Timeout sets a maximum duration before a lobby is force ended.
+	// This timeout applies to lobbies during any states.
+	//
+	// Default is 45 minutes. Set a negative value to disable it.
 	Timeout time.Duration
 
 	// Password sets a lobby password to be check with lobby.CheckPassword().
@@ -71,8 +77,8 @@ func (l *lobbies) Register(opts LobbyOptions) (*Lobby, error) {
 	if opts.MaxPlayers == 0 {
 		opts.MaxPlayers = 25
 	}
-	if opts.Timeout == 0 {
-		opts.Timeout = 15 * time.Minute
+	if opts.RegisterTimeout == 0 {
+		opts.RegisterTimeout = 15 * time.Minute
 	}
 
 	id := newLobbyID()
@@ -89,6 +95,7 @@ func (l *lobbies) Register(opts LobbyOptions) (*Lobby, error) {
 		created:    created,
 		state:      LobbyStateCreated,
 		doneCh:     make(chan struct{}),
+		review:     make(chan bool),
 	}
 
 	quizzes := lobby.listQuizzes()
@@ -123,7 +130,7 @@ func (l *lobbies) Register(opts LobbyOptions) (*Lobby, error) {
 
 	l.lobbies[lobby.id] = lobby
 
-	go l.lobbyTimeout(lobby, opts.Timeout)
+	go l.lobbyTimeout(lobby, opts.RegisterTimeout)
 
 	return lobby, nil
 }

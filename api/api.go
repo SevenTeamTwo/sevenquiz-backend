@@ -22,6 +22,8 @@ const (
 	ResponseTypeStart        ResponseType = "start"
 	ResponseTypeQuestion     ResponseType = "question"
 	ResponseTypeAnswer       ResponseType = "answer"
+	ResponseTypeReview       ResponseType = "review"
+	ResponseTypeResults      ResponseType = "results"
 )
 
 func (r ResponseType) String() string {
@@ -42,6 +44,7 @@ const (
 	RequestTypeConfigure RequestType = "configure"
 	RequestTypeStart     RequestType = "start"
 	RequestTypeAnswer    RequestType = "answer"
+	RequestTypeReview    RequestType = "review"
 	RequestTypeUnknown   RequestType = "unknown"
 )
 
@@ -63,6 +66,8 @@ type ResponseData interface {
 		LobbyUpdateResponseData |
 		StartResponseData |
 		QuestionResponseData |
+		ReviewResponseData |
+		ResultsResponseData |
 		HTTPErrorData | WebsocketErrorData |
 		EmptyResponseData | json.RawMessage
 }
@@ -118,6 +123,20 @@ type (
 
 	QuestionResponseData struct {
 		Question Question `json:"question"`
+	}
+
+	ReviewRequestData struct {
+		Validate bool `json:"validate"`
+	}
+
+	ReviewResponseData struct {
+		Question Question `json:"question"`
+		Player   string   `json:"player"`
+		Answer   Answer   `json:"answer"`
+	}
+
+	ResultsResponseData struct {
+		Results map[string]int `json:"results"`
 	}
 )
 
