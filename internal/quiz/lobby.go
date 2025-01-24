@@ -103,7 +103,7 @@ func (l *Lobby) CloseUnregisteredConns() error {
 	defer l.mu.Unlock()
 
 	var err error
-	for c, player := range l.allPlayers(false) {
+	for c, player := range l.allPlayers() {
 		if player == nil {
 			err2 := c.Close(websocket.StatusNormalClosure, "closing of unregistered conns")
 			if err == nil && err2 != nil {
@@ -317,16 +317,13 @@ func (l *Lobby) AddConn(conn *websocket.Conn) {
 func (l *Lobby) AllPlayers() iter.Seq2[*websocket.Conn, *Player] {
 	l.mu.RLock()
 	defer l.mu.RUnlock()
-	return l.allPlayers(false)
+	return l.allPlayers()
 }
 
-func (l *Lobby) allPlayers(registeredOnly bool) iter.Seq2[*websocket.Conn, *Player] {
+func (l *Lobby) allPlayers() iter.Seq2[*websocket.Conn, *Player] {
 	return func(yield func(*websocket.Conn, *Player) bool) {
 		for i, v := range l.players {
 			if i == nil {
-				continue
-			}
-			if registeredOnly && v == nil {
 				continue
 			}
 			if !yield(i, v) {
@@ -401,7 +398,7 @@ func (l *Lobby) Broadcast(ctx context.Context, fn func(player *Player) any) erro
 	defer l.mu.RUnlock()
 
 	errs := errgroup.Group{}
-	for conn, player := range l.allPlayers(true) {
+	for conn, player := range l.allPlayers() {
 		errs.Go(func() error {
 			res := fn(player)
 			err := wsjson.Write(ctx, conn, res)
